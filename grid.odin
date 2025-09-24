@@ -168,6 +168,7 @@ render_state :: proc(state: State, grid: ^Grid) {
 
 	// Add header
 	header := make([]Cell, grid.cols)
+	defer delete(header)
 	for _, i in header do header[i] = CellInt {
 		value = i + 1,
 	}
@@ -175,6 +176,7 @@ render_state :: proc(state: State, grid: ^Grid) {
 
 	// Add left legend
 	legend := make([]Cell, grid.rows)
+	defer delete(legend)
 	for _, i in legend do legend[i] = CellInt{i}
 	insert_column(grid, 0, legend)
 

@@ -26,6 +26,10 @@ load_data := proc(file_path: string) -> ^Grid {
 
 	csv.reader_init_with_string(&r, string(data))
 	values: [dynamic][dynamic]Cell
+	defer {
+		for row in values do delete(row)
+		delete(values)
+	}
 	for record, row_idx, err in csv.iterator_next(&r) {
 		row := make([dynamic]Cell)
 		append(&values, row)
@@ -40,13 +44,13 @@ load_data := proc(file_path: string) -> ^Grid {
 	for row in 0 ..= last_row do last_col = max(last_col, len(values[row]))
 
 	grid := new_grid(last_row + 1, last_col)
-	
+
 	for row_idx in 0 ..= last_row {
 		for col_idx in 0 ..< len(values[row_idx]) {
 			set_cell(grid, row_idx, col_idx, values[row_idx][col_idx])
 		}
 	}
-	
+
 	trim_grid(grid, 10)
 	return grid
 }
@@ -63,6 +67,7 @@ save_data := proc(grid: ^Grid, file_path: string) {
 	csv.writer_init(&w, os.stream_from_handle(handle))
 
 	grid_to_save := clone_grid(grid)
+	defer delete_grid(grid_to_save)
 	trim_grid(grid_to_save)
 	for row in 0 ..< grid.rows {
 		record := make([]string, grid.cols)
