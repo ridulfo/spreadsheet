@@ -164,7 +164,6 @@ render_state :: proc(state: State, grid: ^Grid) {
 	defer {
 		delete_grid(grid)
 	}
-	trim_grid(grid, MIN_GRID_SIZE)
 
 	// Add header
 	header := make([]Cell, grid.cols)
@@ -199,7 +198,10 @@ render_state :: proc(state: State, grid: ^Grid) {
 	fmt.sbprintln(&buffer)
 
 	strings.write_string(&buffer, "[Cell: ")
-	curr_cell := get_cell(grid, state.cur_row + 1, state.cur_col + 1)
+	// Ensure we don't access out of bounds after inserting header/legend
+	cell_row := min(state.cur_row + 1, grid.rows - 1)
+	cell_col := min(state.cur_col + 1, grid.cols - 1)
+	curr_cell := get_cell(grid, cell_row, cell_col)
 	switch _ in curr_cell {
 	case CellInt:
 		fmt.sbprintf(&buffer, "%d", curr_cell.(CellInt).value)
@@ -291,15 +293,41 @@ clone_grid :: proc(original: ^Grid) -> ^Grid {
 	return new_grid
 }
 
-// Removes all the rows and columns that are all emtpy cells
-//
-// @param minimum the minimum number of rows and columns
-trim_grid :: proc(grid: ^Grid, minimum := 0) {
+// Ensures grid is at least the specified minimum size by expanding if needed
+ensure_grid_size :: proc(grid: ^Grid, min_rows, min_cols: int) {
+	if grid.rows >= min_rows && grid.cols >= min_cols {
+		return // Already large enough
+	}
 
-	// Find the last row that has at least one value
+	new_rows := max(grid.rows, min_rows)
+	new_cols := max(grid.cols, min_cols)
+
+	// Create new cells array with expanded size
+	new_cells := make([dynamic]Cell, new_rows * new_cols)
+	for i in 0 ..< len(new_cells) {
+		new_cells[i] = CellEmpty{}
+	}
+
+	// Copy existing data to new layout
+	for row_idx in 0 ..< grid.rows {
+		for col_idx in 0 ..< grid.cols {
+			new_cells[new_cols * row_idx + col_idx] = get_cell(grid, row_idx, col_idx)
+		}
+	}
+
+	// Replace the old cells array
+	delete(grid.cells)
+	grid.cells = new_cells
+	grid.rows = new_rows
+	grid.cols = new_cols
+}
+
+// Removes empty rows and columns from the edges while preserving minimum positions
+trim_empty_cells :: proc(grid: ^Grid, preserve_rows, preserve_cols: int) {
+	// Find the last row and column that has at least one value
 	last_row, last_col: int
 	for row_idx in 0 ..< grid.rows {
-		for col_idx in 0 ..< grid.cols { 	// TODO: start from last_column
+		for col_idx in 0 ..< grid.cols {
 			cell := get_cell(grid, row_idx, col_idx)
 			switch _ in cell {
 			case CellInt:
@@ -314,8 +342,9 @@ trim_grid :: proc(grid: ^Grid, minimum := 0) {
 		}
 	}
 
-	new_rows := max(last_row + 1, minimum)
-	new_cols := max(last_col + 1, minimum)
+	// Don't shrink below data bounds, preserve positions, or minimum size
+	new_rows := max(last_row + 1, preserve_rows + 1, MIN_GRID_SIZE)
+	new_cols := max(last_col + 1, preserve_cols + 1, MIN_GRID_SIZE)
 
 	if new_rows < grid.rows || new_cols < grid.cols {
 		// Create new cells array with trimmed size

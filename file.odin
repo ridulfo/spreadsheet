@@ -51,7 +51,7 @@ load_data := proc(file_path: string) -> ^Grid {
 		}
 	}
 
-	trim_grid(grid, 10)
+	ensure_grid_size(grid, MIN_GRID_SIZE, MIN_GRID_SIZE)
 	return grid
 }
 
@@ -68,7 +68,7 @@ save_data := proc(grid: ^Grid, file_path: string) {
 
 	grid_to_save := clone_grid(grid)
 	defer delete_grid(grid_to_save)
-	trim_grid(grid_to_save)
+	trim_empty_cells(grid_to_save, 0, 0)
 	for row in 0 ..< grid.rows {
 		record := make([]string, grid.cols)
 		defer delete(record)

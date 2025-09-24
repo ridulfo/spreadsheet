@@ -42,18 +42,28 @@ handle_keypress := proc(c: u8) -> bool {
 		fallthrough
 	case 'k':
 		state.cur_row = min(max(state.cur_row - 1, 0), state.grid.rows - 1)
+		// Trim empty rows from the bottom when moving up
+		trim_empty_cells(state.grid, state.cur_row, state.cur_col)
 	case 66:
 		fallthrough
 	case 'j':
+		if state.cur_row + 1 >= state.grid.rows {
+			insert_row(state.grid, state.grid.rows)
+		}
 		state.cur_row = min(max(state.cur_row + 1, 0), state.grid.rows - 1)
 	case 67:
 		fallthrough
 	case 'l':
+		if state.cur_col + 1 >= state.grid.cols {
+			insert_column(state.grid, state.grid.cols)
+		}
 		state.cur_col = min(max(state.cur_col + 1, 0), state.grid.cols - 1)
 	case 68:
 		fallthrough
 	case 'h':
 		state.cur_col = min(max(state.cur_col - 1, 0), state.grid.cols - 1)
+		// Trim empty columns from the right when moving left
+		trim_empty_cells(state.grid, state.cur_row, state.cur_col)
 	case 10:
 		// Enter
 		fmt.print("Enter value: ")
