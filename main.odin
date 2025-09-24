@@ -61,8 +61,15 @@ handle_keypress := proc(c: u8) -> bool {
 	case 10:
 		// Enter
 		fmt.print("Enter value: ")
-		state.grid[state.cur_row][state.cur_col] = CellInt {
-			value = strconv.atoi(enter_value()),
+		value := enter_value()
+		if len(value) > 0 && value[0] == '=' {
+			state.grid[state.cur_row][state.cur_col] = CellFunc {
+				formula = value,
+			}
+		} else {
+			state.grid[state.cur_row][state.cur_col] = CellInt {
+				value = strconv.atoi(value),
+			}
 		}
 	case 's':
 		for {

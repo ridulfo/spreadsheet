@@ -20,8 +20,8 @@ load_data := proc(file_path: string) -> Grid {
 
 	r: csv.Reader
 	r.trim_leading_space = true
-	r.reuse_record = true // Without it you have to delete(record)
-	r.reuse_record_buffer = true // Without it you have to each of the fields within it
+	r.reuse_record = true // Without this you have to delete(record)
+	r.reuse_record_buffer = true // Without this you have to delete each of the fields within it
 	defer csv.reader_destroy(&r)
 
 	csv.reader_init_with_string(&r, string(data))
@@ -59,10 +59,12 @@ save_data := proc(grid: Grid, file_path: string) {
 
 		for column in 0 ..< n_columns {
 			cell := state.grid[row][column]
-			#partial switch _ in cell {
+			switch _ in cell {
+			case CellFunc:
+				record[column] = cell.(CellFunc).formula
 			case CellInt:
 				record[column] = fmt.tprintf("%d", cell.(CellInt).value)
-			case:
+			case CellEmpty:
 				record[column] = ""
 			}
 		}
