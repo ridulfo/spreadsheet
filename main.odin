@@ -11,7 +11,7 @@ None :: struct {}
 
 State :: struct {
 	cur_col, cur_row: int,
-	grid:             Grid,
+	grid:             ^Grid,
 	file_path:        string,
 }
 
@@ -45,31 +45,32 @@ handle_keypress := proc(c: u8) -> bool {
 	case 65:
 		fallthrough
 	case 'k':
-		state.cur_row = min(max(state.cur_row - 1, 0), len(state.grid) - 1)
+		state.cur_row = min(max(state.cur_row - 1, 0), state.grid.rows - 1)
 	case 66:
 		fallthrough
 	case 'j':
-		state.cur_row = min(max(state.cur_row + 1, 0), len(state.grid) - 1)
+		state.cur_row = min(max(state.cur_row + 1, 0), state.grid.rows - 1)
 	case 67:
 		fallthrough
 	case 'l':
-		state.cur_col = min(max(state.cur_col + 1, 0), len(state.grid[0]) - 1)
+		state.cur_col = min(max(state.cur_col + 1, 0), state.grid.cols - 1)
 	case 68:
 		fallthrough
 	case 'h':
-		state.cur_col = min(max(state.cur_col - 1, 0), len(state.grid[0]) - 1)
+		state.cur_col = min(max(state.cur_col - 1, 0), state.grid.cols - 1)
 	case 10:
 		// Enter
 		fmt.print("Enter value: ")
 		value := enter_value()
 		if len(value) > 0 && value[0] == '=' {
-			state.grid[state.cur_row][state.cur_col] = CellFunc {
-				formula = value,
-			}
+			set_cell(state.grid, state.cur_row, state.cur_col, CellFunc{formula = value})
 		} else {
-			state.grid[state.cur_row][state.cur_col] = CellInt {
-				value = strconv.atoi(value),
-			}
+			set_cell(
+				state.grid,
+				state.cur_row,
+				state.cur_col,
+				CellInt{value = strconv.atoi(value)},
+			)
 		}
 	case 's':
 		for {
@@ -127,8 +128,7 @@ main :: proc() {
 	}
 
 	defer {
-		for row in state.grid do delete(row)
-		delete(state.grid)
+		delete_grid(state.grid)
 	}
 
 	enter_raw_mode()

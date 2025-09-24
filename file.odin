@@ -4,7 +4,7 @@ import "core:fmt"
 import "core:os"
 import "core:strconv"
 
-load_data := proc(file_path: string) -> Grid {
+load_data := proc(file_path: string) -> ^Grid {
 	handle, err := os.open(file_path)
 	if err != nil {
 		fmt.eprintfln("Cannot open %s", file_path)
@@ -25,21 +25,33 @@ load_data := proc(file_path: string) -> Grid {
 	defer csv.reader_destroy(&r)
 
 	csv.reader_init_with_string(&r, string(data))
-	grid: Grid
+	values: [dynamic][dynamic]Cell
 	for record, row_idx, err in csv.iterator_next(&r) {
 		row := make([dynamic]Cell)
-		append(&grid, row)
+		append(&values, row)
 		if err != nil { /* Do something with error */}
 		for value, column_idx in record {
-			if value == "" do append(&grid[row_idx], CellEmpty{})
-			else do append(&grid[row_idx], CellInt{strconv.atoi(value)})
+			if value == "" do append(&values[row_idx], CellEmpty{})
+			else do append(&values[row_idx], CellInt{strconv.atoi(value)})
 		}
 	}
-	trim_grid(&grid, 10)
+	last_row := len(values) - 1
+	last_col: int
+	for row in 0 ..= last_row do last_col = max(last_col, len(values[row]))
+
+	grid := new_grid(last_row + 1, last_col)
+	
+	for row_idx in 0 ..= last_row {
+		for col_idx in 0 ..< len(values[row_idx]) {
+			set_cell(grid, row_idx, col_idx, values[row_idx][col_idx])
+		}
+	}
+	
+	trim_grid(grid, 10)
 	return grid
 }
 
-save_data := proc(grid: Grid, file_path: string) {
+save_data := proc(grid: ^Grid, file_path: string) {
 	handle, err := os.open(file_path, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0o644)
 	if err != nil {
 		fmt.eprintfln("Cannot open %s - Error: %v", file_path, err)
@@ -51,14 +63,13 @@ save_data := proc(grid: Grid, file_path: string) {
 	csv.writer_init(&w, os.stream_from_handle(handle))
 
 	grid_to_save := clone_grid(grid)
-	trim_grid(&grid_to_save)
-	n_rows, n_columns := len(grid), len(grid[0])
-	for row in 0 ..< n_rows {
-		record := make([]string, n_columns)
+	trim_grid(grid_to_save)
+	for row in 0 ..< grid.rows {
+		record := make([]string, grid.cols)
 		defer delete(record)
 
-		for column in 0 ..< n_columns {
-			cell := state.grid[row][column]
+		for column in 0 ..< grid.cols {
+			cell := get_cell(grid, row, column)
 			switch _ in cell {
 			case CellFunc:
 				record[column] = cell.(CellFunc).formula
