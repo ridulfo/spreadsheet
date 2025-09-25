@@ -4,7 +4,7 @@ import "core:fmt"
 import "core:os"
 import "core:strconv"
 
-load_data := proc(file_path: string) -> ^Grid {
+load_data :: proc(file_path: string) -> ^Grid {
 	handle, err := os.open(file_path)
 	if err != nil {
 		fmt.eprintfln("Cannot open %s", file_path)
@@ -55,7 +55,7 @@ load_data := proc(file_path: string) -> ^Grid {
 	return grid
 }
 
-save_data := proc(grid: ^Grid, file_path: string) {
+save_data :: proc(grid: ^Grid, file_path: string) {
 	handle, err := os.open(file_path, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0o644)
 	if err != nil {
 		fmt.eprintfln("Cannot open %s - Error: %v", file_path, err)

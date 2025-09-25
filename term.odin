@@ -4,7 +4,7 @@ import "core:os"
 import "core:sys/posix"
 
 oldt, newt: posix.termios;
-enter_raw_mode := proc(){
+enter_raw_mode :: proc(){
 
 	// Get current terminal attributes
 	if posix.tcgetattr(posix.FD(os.stdin), &oldt) != .OK {
@@ -26,14 +26,14 @@ enter_raw_mode := proc(){
 	fmt.print("\033[?25l")
 }
 
-exit_raw_mode := proc() {
+exit_raw_mode :: proc() {
 	// Show cursor
 	fmt.print("\033[?25h")
 	// Restore old terminal settings before exit
 	posix.tcsetattr(posix.FD(os.stdin), .TCSANOW, &oldt)
 }
 
-get_press := proc() -> u8{
+get_press :: proc() -> u8{
 	buf: [1]u8
 	n, err := os.read(os.stdin, buf[:])
 	if err != 0 || n == 0 {

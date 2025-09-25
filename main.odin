@@ -19,7 +19,7 @@ State :: struct {
 state := State{}
 
 
-enter_value := proc() -> string {
+enter_value :: proc() -> string {
 	exit_raw_mode()
 	defer enter_raw_mode()
 
@@ -34,7 +34,7 @@ enter_value := proc() -> string {
 	return strings.clone(string(buf[:end]))
 }
 
-handle_keypress := proc(c: u8) -> bool {
+handle_keypress :: proc(c: u8) -> bool {
 	switch c {
 	case 'q':
 		return true
