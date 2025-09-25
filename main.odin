@@ -70,7 +70,12 @@ handle_keypress :: proc(c: u8) -> bool {
 		value := enter_value()
 		defer delete(value)
 		if len(value) > 0 && value[0] == '=' {
-			set_cell(state.grid, state.cur_row, state.cur_col, CellFunc{formula = value})
+			set_cell(
+				state.grid,
+				state.cur_row,
+				state.cur_col,
+				CellFunc{formula = strings.clone(value)},
+			)
 		} else {
 			parsed_value, ok := strconv.parse_int(value)
 			if ok {
