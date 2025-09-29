@@ -153,5 +153,6 @@ main :: proc() {
 		render_state(state, state.grid)
 		c := get_press()
 		should_exit = handle_keypress(c)
+		evaluate_grid(state.grid)
 	}
 }

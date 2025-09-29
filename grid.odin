@@ -13,6 +13,7 @@ CellEmpty :: struct {}
 CellFunc :: struct {
 	formula: string,
 	value:   int,
+	error:   string,
 }
 
 Cell :: union {
@@ -202,11 +203,12 @@ render_state :: proc(state: State, grid: ^Grid) {
 	cell_row := min(state.cur_row + 1, grid.rows - 1)
 	cell_col := min(state.cur_col + 1, grid.cols - 1)
 	curr_cell := get_cell(grid, cell_row, cell_col)
-	switch _ in curr_cell {
+	switch cell in curr_cell {
 	case CellInt:
 		fmt.sbprintf(&buffer, "%d", curr_cell.(CellInt).value)
 	case CellFunc:
-		strings.write_string(&buffer, curr_cell.(CellFunc).formula)
+		if cell.error != "" do strings.write_string(&buffer, cell.error)
+		else do strings.write_string(&buffer, cell.formula)
 	case CellEmpty:
 	}
 
@@ -398,22 +400,3 @@ max_column_widths :: proc(grid: ^Grid, cur_row: int, cur_col: int) -> []int {
 	}
 	return column_widths
 }
-
-
-// compute_grid :: proc(grid: ^Grid) {
-// 	n_rows, n_columns := len(grid), len(grid[0])
-// 	for row in 0 ..< n_rows {
-// 		for column in 0 ..< n_columns {
-// 			cell := grid[row][column]
-// 			switch _ in cell {
-// 			case CellFunc:
-// 				break
-// 			case CellInt:
-// 				continue
-// 			case CellEmpty:
-// 				continue
-// 			}
-//
-// 		}
-// 	}
-// }
