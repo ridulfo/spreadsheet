@@ -20,7 +20,7 @@ validate_identifier :: proc(identifier: string) -> bool {
 identifier_to_coordinates :: proc(identifier: string) -> (row: int, col: int, ok: bool) {
 	// TODO: support for longer coordinates AA123
 	col = int(identifier[0] - 'A')
-	if 0 <= col && col <= 25 do return 0, 0, false
+	if 0 > col || col > 25 do return 0, 0, false
 	row_num, parse_ok := strconv.parse_int(identifier[1:])
 	if !parse_ok do return 0, 0, false
 	row = row_num - 1 // Convert from 1-based to 0-based indexing
