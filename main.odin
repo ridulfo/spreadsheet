@@ -64,6 +64,8 @@ handle_keypress :: proc(c: u8) -> bool {
 		state.cur_col = min(max(state.cur_col - 1, 0), state.grid.cols - 1)
 		// Trim empty columns from the right when moving left
 		trim_empty_cells(state.grid, state.cur_row, state.cur_col)
+	case 'i':
+		fallthrough
 	case 10:
 		// Enter
 		fmt.print("Enter value: ")
