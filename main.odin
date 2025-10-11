@@ -150,6 +150,9 @@ main :: proc() {
 
 	enter_raw_mode()
 	defer exit_raw_mode()
+
+	evaluate_grid(state.grid)
+
 	should_exit := false
 	for (!should_exit) {
 		render_state(state, state.grid)

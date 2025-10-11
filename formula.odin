@@ -1,5 +1,6 @@
 package main
 import "core:c"
+import "core:container/queue"
 import "core:fmt"
 import "core:log"
 import "core:odin/ast"
@@ -28,10 +29,34 @@ identifier_to_coordinates :: proc(identifier: string) -> (row: int, col: int, ok
 	return // Uses named parameters
 }
 
-evaluate_cell :: proc(grid: ^Grid, cell: CellFunc) -> (result: int, err: string) {
-	assert(cell.formula[0] == '=', "Formula needs to start with a =")
-	formula := cell.formula[1:]
+coordinates_to_identifier :: proc(row: int, col: int, allocator := context.allocator) -> string {
+	col := col + 1 // To allow for mutation + 1-based
 
+	buf: [8]u8 // Should be enough for evry large grids
+	n := 0
+	for col > 0 {
+		col -= 1
+		remainder := col % 26
+		buf[n] = u8('A' + remainder)
+		n += 1
+		col /= 26
+	}
+
+	builder: strings.Builder
+	strings.builder_init(&builder)
+	defer strings.builder_destroy(&builder)
+
+	// Write letters in reverse order
+	for i := n - 1; i >= 0; i -= 1 {
+		strings.write_rune(&builder, rune(buf[i]))
+	}
+
+	fmt.sbprintf(&builder, "%d", row + 1)
+
+	return strings.clone(strings.to_string(builder), allocator)
+}
+
+parse_formula :: proc(formula: string) -> ^ast.Expr {
 	t := tokenizer.Tokenizer{}
 	p := parser.Parser{}
 	tokenizer.init(&t, formula, "formula")
@@ -53,7 +78,22 @@ evaluate_cell :: proc(grid: ^Grid, cell: CellFunc) -> (result: int, err: string)
 	parser.advance_token(&p)
 
 	// Parse the expression
-	expr := parser.parse_expr(&p, false)
+	return parser.parse_expr(&p, false)
+}
+
+evaluate_cell :: proc(grid: ^Grid, cell: CellFunc) -> (result: int, err: string) {
+	assert(cell.formula[0] == '=', "Formula needs to start with a =")
+	formula := cell.formula[1:]
+
+	// Use temp allocator only for AST parsing to avoid leaks
+	expr: ^ast.Expr
+	{
+		prev_allocator := context.allocator
+		context.allocator = context.temp_allocator
+		defer context.allocator = prev_allocator
+
+		expr = parse_formula(formula)
+	}
 
 	// Traverse and evaluate the AST
 	return evaluate_ast_expr(expr, grid)
@@ -147,19 +187,170 @@ evaluate_ast_expr :: proc(expr: ^ast.Expr, grid: ^Grid) -> (result: int, err: st
 	}
 }
 
-evaluate_grid :: proc(grid: ^Grid) {
-	for column in 0 ..< grid.cols {
-		for row in 0 ..< grid.rows {
-			cell := get_cell(grid, row, column)
-			func_cell, ok := cell.(CellFunc)
-			if !ok do continue
+find_deps :: proc(grid: ^Grid) -> map[string][dynamic]string {
+	rec_find :: proc(node: ^ast.Node, collect_deps: ^[dynamic]string) {
+		#partial switch node in node.derived {
+		case ^ast.Ident:
+			if validate_identifier(node.name) {
+				append(collect_deps, node.name)
+			}
+		case ^ast.Binary_Expr:
+			rec_find(node.left, collect_deps)
+			rec_find(node.right, collect_deps)
+		case ^ast.Unary_Expr:
+			rec_find(node.expr, collect_deps)
+		case ^ast.Paren_Expr:
+			rec_find(node.expr, collect_deps)
+		case ^ast.Call_Expr:
+			// Function calls like SUM(A1:A5)
+			panic("Function calls not implemented yet")
+		case:
+			log.error("Unsupported AST node type:", node)
+			panic("Unsupported AST node")
+		}
+	}
 
-			value, error := evaluate_cell(grid, cell.(CellFunc))
+	graph := make(map[string][dynamic]string)
+
+	for row in 0 ..< grid.rows {
+		for column in 0 ..< grid.cols {
+			func_cell := get_cell(grid, row, column).(CellFunc) or_continue
+			all_deps := make([dynamic]string)
+			formula := func_cell.formula[1:] // Strip the leading '='
+
+			// Use temp allocator for AST parsing to avoid leaks
+			{
+				prev_allocator := context.allocator
+				context.allocator = context.temp_allocator
+				defer context.allocator = prev_allocator
+
+				expr: ^ast.Node = parse_formula(formula)
+				rec_find(expr, &all_deps)
+			}
+
+			graph[coordinates_to_identifier(row, column)] = all_deps
+		}
+	}
+	return graph
+}
+
+
+topological_sort :: proc(deps: ^map[string][dynamic]string) -> ([dynamic]string, bool) {
+	// Uses Kahn’s algorithm
+	//
+	// Use core:container/topological_sort if this is too slow. Hand rolled this to learn.
+	//
+	// Terminology:
+	// A-->B: A is the dependency, B is the dependent
+	//
+	// 1. reverse the dependency map from dependent-->dependency to
+	// dependency-->dependent. This will be used to easily update in-degree
+	// 2. Initialize the queue with all nodes that do not have any
+	// dependencies (i.e in-degree == 0)
+	// 3. Pop the first queue element, add it to the order, decrease all its dependent's in-degree
+	// 4. Repeat 3 while there are elements in the queue
+	// 5. If at the end the length of the `order` isn't the same as the
+	// total number of nodes, then there was a cycle.
+
+	// This will be returned
+	order := make([dynamic]string)
+
+	// Number of nodes depending on a node
+	indegree := make(map[string]int, context.temp_allocator)
+	// dependency of --> cell, used to decrement in-degrees efficiently
+	rev_deps := make(map[string][dynamic]string, context.temp_allocator)
+
+	// Build indegree and reverse dependency list
+	for node, node_dependencies in deps^ {
+		if node not_in indegree do indegree[node] = 0
+
+		for dependency in node_dependencies {
+			// Ensure dependency is in indegree map (leaf nodes have indegree 0)
+			if dependency not_in indegree do indegree[dependency] = 0
+
+			if dependency not_in rev_deps {
+				rev_deps[dependency] = make([dynamic]string, context.temp_allocator)
+			}
+
+			append(&rev_deps[dependency], strings.clone(node, context.temp_allocator))
+			indegree[node] += 1
+		}
+
+	}
+
+	node_queue: queue.Queue(string)
+	queue.init(&node_queue, allocator = context.temp_allocator)
+	for node, val in indegree {
+		if val == 0 do queue.push_back(&node_queue, node)
+	}
+
+	for queue.len(node_queue) > 0 {
+		node := queue.pop_front(&node_queue)
+		append(&order, node)
+		for dependant in (rev_deps[node] or_else [dynamic]string{}) {
+			indegree[dependant] -= 1
+			if indegree[dependant] == 0 {
+				queue.push_back(&node_queue, dependant)
+			}
+		}
+	}
+
+	if len(order) != len(indegree) {
+		return order, false
+	}
+
+	return order, true
+}
+
+// Evaluates a grid containing functinal cells
+//
+// First, an associative array is created keeping Cells --> dependencies.
+// Second, the keys of this associative array are topologically sorted in order
+// to determine the order that they need to be evaluated.
+// Finally, the functions are evaluated in said order and the functional cell's
+// value field is updated in-place.
+evaluate_grid :: proc(grid: ^Grid) {
+	dependencies := find_deps(grid)
+	defer {
+		for key, value in dependencies {
+			delete(key)
+			delete(value)
+		}
+		delete(dependencies)
+	}
+
+	order, ok := topological_sort(&dependencies)
+	defer delete(order)
+
+	// If there's a cycle, set error on all formula cells
+	if !ok {
+		for row in 0 ..< grid.rows {
+			for column in 0 ..< grid.cols {
+				cell := get_cell(grid, row, column)
+				if func_cell, is_func := cell.(CellFunc); is_func {
+					func_cell.error = "Cyclic dependency detected"
+					func_cell.value = 0
+					set_cell(grid, row, column, func_cell)
+				}
+			}
+		}
+		return
+	}
+
+	// Evaluate cells in topological order
+	for identifier in order {
+		row, col, parse_ok := identifier_to_coordinates(identifier)
+		if !parse_ok do continue
+
+		cell := get_cell(grid, row, col)
+		if func_cell, is_func := cell.(CellFunc); is_func {
+			value, error := evaluate_cell(grid, func_cell)
 			func_cell.value = value
 			func_cell.error = error
-			set_cell(grid, row, column, func_cell)
+			set_cell(grid, row, col, func_cell)
 		}
-	}}
+	}
+}
 
 @(test)
 test_one_cell :: proc(t: ^testing.T) {
@@ -464,6 +655,21 @@ test_identifier_to_coordinates :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_coordinates_to_identifier :: proc(t: ^testing.T) {
+	result1 := coordinates_to_identifier(0, 0, context.temp_allocator)
+	testing.expect_value(t, result1, "A1")
+
+	result2 := coordinates_to_identifier(4, 1, context.temp_allocator)
+	testing.expect_value(t, result2, "B5")
+
+	result3 := coordinates_to_identifier(98, 25, context.temp_allocator)
+	testing.expect_value(t, result3, "Z99")
+
+	result4 := coordinates_to_identifier(0, 2, context.temp_allocator)
+	testing.expect_value(t, result4, "C1")
+}
+
+@(test)
 test_empty_cells :: proc(t: ^testing.T) {
 	grid := new_grid()
 	defer delete_grid(grid)
@@ -515,4 +721,135 @@ test_mixed_cell_types :: proc(t: ^testing.T) {
 	val, err = evaluate_cell(grid, get_cell(grid, 1, 0).(CellFunc))
 	testing.expect(t, val == 10 + 20 + 0)
 	testing.expect(t, err == "")
+}
+
+@(test)
+test_topological_sort :: proc(t: ^testing.T) {
+	// B depends on A, C
+	// C depends on D
+	// A depends on nothing
+	// D depends on nothing
+
+	deps: map[string][dynamic]string
+	defer {
+		for k, v in deps do delete(v)
+		delete(deps)
+	}
+	deps["A"] = [dynamic]string{}
+	deps["B"] = [dynamic]string{}
+	deps["C"] = [dynamic]string{}
+	deps["D"] = [dynamic]string{}
+	append(&deps["B"], "A", "C")
+	append(&deps["C"], "D")
+
+	order, ok := topological_sort(&deps)
+	defer delete(order)
+	testing.expect_value(t, ok, true)
+
+	// Create index lookup to make order deterministic
+	index := map[string]int{}
+	defer delete(index)
+	for v, i in order {
+		index[v] = i
+	}
+
+	expect_before := proc(t: ^testing.T, index: map[string]int, a, b: string) {
+		testing.expect(t, index[a] < index[b], fmt.tprintf("%s should come before %s", a, b))
+	}
+
+	// Order constraints (allowing for equivalent valid topological orders)
+	expect_before(t, index, "D", "C")
+	expect_before(t, index, "A", "B")
+	expect_before(t, index, "C", "B")
+
+	// Check all nodes exist
+	for name in ([]string{"A", "B", "C", "D"}) {
+		_, ok := index[name]
+		testing.expect_value(t, ok, true)
+	}
+}
+
+@(test)
+test_topological_sort_complex :: proc(t: ^testing.T) {
+	// Graph layout:
+	//   A → B → E
+	//   A → C → D → E
+	//   F → G
+	//   H → (no deps)
+	//
+	// Two independent components: {A,B,C,D,E} and {F,G}, plus isolated H.
+
+	deps: map[string][dynamic]string
+	defer {
+		for _, v in deps do delete(v)
+		delete(deps)
+	}
+
+	// Initialize dependency lists
+	deps["A"] = [dynamic]string{}
+	deps["B"] = [dynamic]string{}
+	deps["C"] = [dynamic]string{}
+	deps["D"] = [dynamic]string{}
+	deps["E"] = [dynamic]string{}
+	deps["F"] = [dynamic]string{}
+	deps["G"] = [dynamic]string{}
+	deps["H"] = [dynamic]string{}
+
+	// Build edges
+	append(&deps["B"], "A")
+	append(&deps["C"], "A")
+	append(&deps["D"], "C")
+	append(&deps["E"], "B", "D")
+	append(&deps["G"], "F")
+
+	order, ok := topological_sort(&deps)
+	defer delete(order)
+	testing.expect_value(t, ok, true)
+
+	// Because multiple valid topological orders exist, we test constraints
+	index := map[string]int{}
+	defer delete(index)
+	for v, i in order {
+		index[v] = i
+	}
+
+	// Dependency order constraints
+	expect_before := proc(t: ^testing.T, index: map[string]int, a, b: string) {
+		testing.expect(t, index[a] < index[b], fmt.tprintf("%s should come before %s", a, b))
+	}
+
+	expect_before(t, index, "A", "B")
+	expect_before(t, index, "A", "C")
+	expect_before(t, index, "C", "D")
+	expect_before(t, index, "B", "E")
+	expect_before(t, index, "D", "E")
+	expect_before(t, index, "F", "G")
+
+	// H can appear anywhere, but should exist in the order
+	found_H := false
+	for v, _ in order {
+		if v == "H" {
+			found_H = true
+			break
+		}
+	}
+	testing.expect_value(t, found_H, true)
+}
+
+@(test)
+test_topological_sort_cycle_detection :: proc(t: ^testing.T) {
+	// Create a simple cycle: X → Y → X
+	deps: map[string][dynamic]string
+	defer {
+		for _, v in deps do delete(v)
+		delete(deps)
+	}
+
+	deps["X"] = [dynamic]string{}
+	deps["Y"] = [dynamic]string{}
+	append(&deps["Y"], "X")
+	append(&deps["X"], "Y")
+
+	_, ok := topological_sort(&deps)
+	testing.expect_value(t, ok, false) // Should fail because of cycle
 }

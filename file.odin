@@ -3,14 +3,9 @@ import "core:encoding/csv"
 import "core:fmt"
 import "core:os"
 import "core:strconv"
+import "core:strings"
 
 load_data :: proc(file_path: string) -> ^Grid {
-	handle, err := os.open(file_path)
-	if err != nil {
-		fmt.eprintfln("Cannot open %s", file_path)
-		os.exit(1)
-	}
-
 	data, success := os.read_entire_file(file_path)
 	defer delete(data)
 	if !success {
@@ -36,7 +31,9 @@ load_data :: proc(file_path: string) -> ^Grid {
 		if err != nil { /* Do something with error */}
 		for value, column_idx in record {
 			if value == "" do append(&values[row_idx], CellEmpty{})
-			else do append(&values[row_idx], CellInt{strconv.atoi(value)})
+			else if len(value) > 0 && value[0] == '=' {
+				append(&values[row_idx], CellFunc{formula = strings.clone(value)})
+			} else do append(&values[row_idx], CellInt{strconv.atoi(value)})
 		}
 	}
 	last_row := len(values) - 1
