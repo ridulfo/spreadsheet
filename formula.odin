@@ -126,12 +126,14 @@ evaluate_ast_expr :: proc(expr: ^ast.Expr, grid: ^Grid) -> (result: int, err: st
 			}
 
 			cell := get_cell(grid, row, col)
-			#partial switch c in cell {
+			switch cell in cell {
 			case CellInt:
-				return c.value, ""
+				return cell.value, ""
 			case CellFunc:
 				// Recursive evaluation
-				return evaluate_cell(grid, c)
+				return evaluate_cell(grid, cell)
+			case CellText:
+				panic("Unimplemented: cannot evaluate CellText")
 			case CellEmpty:
 				return 0, ""
 			case:

@@ -33,7 +33,14 @@ load_data :: proc(file_path: string) -> ^Grid {
 			if value == "" do append(&values[row_idx], CellEmpty{})
 			else if len(value) > 0 && value[0] == '=' {
 				append(&values[row_idx], CellFunc{formula = strings.clone(value)})
-			} else do append(&values[row_idx], CellInt{strconv.atoi(value)})
+			} else {
+				parsed_value, ok := strconv.parse_int(value)
+				if ok {
+					append(&values[row_idx], CellInt{value = parsed_value})
+				} else {
+					append(&values[row_idx], CellText{value = strings.clone(value)})
+				}
+			}
 		}
 	}
 	last_row := len(values) - 1
@@ -72,11 +79,13 @@ save_data :: proc(grid: ^Grid, file_path: string) {
 
 		for column in 0 ..< grid.cols {
 			cell := get_cell(grid, row, column)
-			switch _ in cell {
+			switch cell in cell {
 			case CellFunc:
-				record[column] = cell.(CellFunc).formula
+				record[column] = cell.formula
 			case CellInt:
-				record[column] = fmt.tprintf("%d", cell.(CellInt).value)
+				record[column] = fmt.tprintf("%d", cell.value)
+			case CellText:
+				record[column] = cell.value
 			case CellEmpty:
 				record[column] = ""
 			}

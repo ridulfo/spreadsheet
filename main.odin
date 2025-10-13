@@ -83,8 +83,12 @@ handle_keypress :: proc(c: u8) -> bool {
 			if ok {
 				set_cell(state.grid, state.cur_row, state.cur_col, CellInt{value = parsed_value})
 			} else {
-				fmt.printf("Failed to parse '%s' as integer\n", value)
-				os.exit(1)
+				set_cell(
+					state.grid,
+					state.cur_row,
+					state.cur_col,
+					CellText{value = strings.clone(value)},
+				)
 
 			}
 		}

@@ -16,9 +16,14 @@ CellFunc :: struct {
 	error:   string,
 }
 
+CellText :: struct {
+	value: string,
+}
+
 Cell :: union {
 	CellInt,
 	CellFunc,
+	CellText,
 	CellEmpty,
 }
 
@@ -169,8 +174,8 @@ render_state :: proc(state: State, grid: ^Grid) {
 	// Add header
 	header := make([]Cell, grid.cols)
 	defer delete(header)
-	for _, i in header do header[i] = CellInt {
-		value = i + 1,
+	for _, i in header do header[i] = CellText {
+		value = column_to_column_label(i),
 	}
 	insert_row(grid, 0, header)
 
@@ -205,10 +210,12 @@ render_state :: proc(state: State, grid: ^Grid) {
 	curr_cell := get_cell(grid, cell_row, cell_col)
 	switch cell in curr_cell {
 	case CellInt:
-		fmt.sbprintf(&buffer, "%d", curr_cell.(CellInt).value)
+		fmt.sbprintf(&buffer, "%d", cell.value)
 	case CellFunc:
 		if cell.error != "" do strings.write_string(&buffer, cell.error)
 		else do strings.write_string(&buffer, cell.formula)
+	case CellText:
+		strings.write_string(&buffer, cell.value)
 	case CellEmpty:
 	}
 
@@ -241,17 +248,24 @@ render_state :: proc(state: State, grid: ^Grid) {
 				strings.write_string(&buffer, " ")
 			}
 
-			switch _ in cell {
+			switch cell in cell {
 			case CellInt:
-				as_str := fmt.tprintf("%d", cell.(CellInt).value)
+				as_str := fmt.tprintf("%d", cell.value)
 				for _ in 0 ..< (column_widths[column] - len(as_str)) {
 					strings.write_string(&buffer, " ")
 				}
 				strings.write_string(&buffer, as_str)
 			case CellFunc:
 				as_str: string
-				if is_cur_cell do as_str = cell.(CellFunc).formula
-				else do as_str = fmt.tprintf("%d", cell.(CellFunc).value)
+				if is_cur_cell do as_str = cell.formula
+				else do as_str = fmt.tprintf("%d", cell.value)
+
+				for _ in 0 ..< (column_widths[column] - len(as_str)) {
+					strings.write_string(&buffer, " ")
+				}
+				strings.write_string(&buffer, as_str)
+			case CellText:
+				as_str := cell.value
 
 				for _ in 0 ..< (column_widths[column] - len(as_str)) {
 					strings.write_string(&buffer, " ")
@@ -338,6 +352,9 @@ trim_empty_cells :: proc(grid: ^Grid, preserve_rows, preserve_cols: int) {
 			case CellFunc:
 				last_col = max(last_col, col_idx)
 				last_row = max(last_row, row_idx)
+			case CellText:
+				last_col = max(last_col, col_idx)
+				last_row = max(last_row, row_idx)
 			case CellEmpty:
 				continue
 			}
@@ -379,19 +396,23 @@ max_column_widths :: proc(grid: ^Grid, cur_row: int, cur_col: int) -> []int {
 		for row in 0 ..< grid.rows {
 			cell := get_cell(grid, row, column)
 			is_cur_cell := column == cur_col + 1 && row == cur_row + 1
-			switch _ in cell {
+			switch cell in cell {
 			case CellInt:
-				as_str := fmt.tprintf("%d", cell.(CellInt).value)
+				as_str := fmt.tprintf("%d", cell.value)
 				max_col_width = max(len(as_str), max_col_width)
 			case CellFunc:
 				length: int
 				if is_cur_cell {
-					length = len(cell.(CellFunc).formula)
+					length = len(cell.formula)
 				} else {
-					as_str := fmt.tprintf("%d", cell.(CellFunc).value)
+					as_str := fmt.tprintf("%d", cell.value)
 					length = len(as_str)
 				}
 				max_col_width = max(length, max_col_width)
+			case CellText:
+				length := len(cell.value)
+				max_col_width = max(length, max_col_width)
+
 			case CellEmpty:
 				continue
 			}
