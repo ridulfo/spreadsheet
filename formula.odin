@@ -29,28 +29,39 @@ identifier_to_coordinates :: proc(identifier: string) -> (row: int, col: int, ok
 	return // Uses named parameters
 }
 
-coordinates_to_identifier :: proc(row: int, col: int, allocator := context.allocator) -> string {
-	col := col + 1 // To allow for mutation + 1-based
-
-	buf: [8]u8 // Should be enough for evry large grids
+// Turns a column index into a bijective base-26 number label
+//
+// Also known as Excel-style column labels
+// `0 => A`, `1 => B`, `26 => AA`
+column_to_column_label :: proc(index: int, allocator := context.allocator) -> string {
+	index := index + 1
+	buf: [8]u8 // enough for large column indices
 	n := 0
-	for col > 0 {
-		col -= 1
-		remainder := col % 26
+
+	for index > 0 {
+		index -= 1
+		remainder := index % 26
 		buf[n] = u8('A' + remainder)
 		n += 1
-		col /= 26
+		index /= 26
 	}
 
+	// Reverse the slice because we filled it backwards
+	for i in 0 ..< (n / 2) {
+		buf[i], buf[n - 1 - i] = buf[n - 1 - i], buf[i]
+	}
+
+	// Convert only the initialized part of the buffer
+	return strings.clone(string(buf[:n]), allocator)
+}
+
+coordinates_to_identifier :: proc(row: int, col: int, allocator := context.allocator) -> string {
 	builder: strings.Builder
 	strings.builder_init(&builder)
 	defer strings.builder_destroy(&builder)
 
-	// Write letters in reverse order
-	for i := n - 1; i >= 0; i -= 1 {
-		strings.write_rune(&builder, rune(buf[i]))
-	}
-
+	column := column_to_column_label(col, context.temp_allocator)
+	strings.write_string(&builder, column)
 	fmt.sbprintf(&builder, "%d", row + 1)
 
 	return strings.clone(strings.to_string(builder), allocator)
@@ -852,4 +863,18 @@ test_topological_sort_cycle_detection :: proc(t: ^testing.T) {
 
 	_, ok := topological_sort(&deps)
 	testing.expect_value(t, ok, false) // Should fail because of cycle
+}
+
+@(test)
+test_index_to_column :: proc(t: ^testing.T) {
+	col1 := column_to_column_label(0, context.temp_allocator)
+	col2 := column_to_column_label(1, context.temp_allocator)
+	col3 := column_to_column_label(26, context.temp_allocator)
+	col4 := column_to_column_label(702, context.temp_allocator)
+	col5 := column_to_column_label(703, context.temp_allocator)
+	testing.expect_value(t, col1, "A")
+	testing.expect_value(t, col2, "B")
+	testing.expect_value(t, col3, "AA")
+	testing.expect_value(t, col4, "AAA")
+	testing.expect_value(t, col5, "AAB")
 }
