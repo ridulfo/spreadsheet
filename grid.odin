@@ -44,6 +44,23 @@ set_cell :: proc(grid: ^Grid, row: int, col: int, value: Cell) {
 	grid.cells[grid.cols * row + col] = value
 }
 
+cell_to_string :: proc(cell: Cell) -> string {
+	to_return: string
+	switch cell in cell {
+	case CellInt:
+		to_return = fmt.tprintf("%d", cell.value)
+	case CellFunc:
+		to_return = cell.error != "" ? cell.error : cell.formula
+	case CellText:
+		to_return = cell.value
+	case CellEmpty:
+		to_return = ""
+	case:
+		to_return = ""
+	}
+	return strings.clone(to_return)
+}
+
 
 MIN_GRID_SIZE :: 20
 
@@ -173,7 +190,10 @@ render_state :: proc(state: State, grid: ^Grid) {
 
 	// Add header
 	header := make([]Cell, grid.cols)
-	defer delete(header)
+	defer {
+		for cell in header do delete(cell.(CellText).value)
+		delete(header)
+	}
 	for _, i in header do header[i] = CellText {
 		value = column_to_column_label(i),
 	}
@@ -191,15 +211,27 @@ render_state :: proc(state: State, grid: ^Grid) {
 	column_widths := max_column_widths(grid, state.cur_row, state.cur_col)
 	defer delete(column_widths)
 
+	mode: string
+	switch state.mode {
+	case .normal:
+		mode = "Normal"
+	case .insert:
+		mode = "Insert"
+	case .visual:
+		mode = "Visual"
+	}
+	if state.cell_picking do mode = "Picking"
+
 	// Write status line
 	fmt.sbprintf(
 		&buffer,
-		"rows: %d | columns: %d | row: %d | col:%d | file: %s\n",
+		"rows: %d | columns: %d | row: %d | col:%d | file: %s | mode: %s\n",
 		grid.rows,
 		grid.cols,
 		state.cur_row + 1,
 		state.cur_col + 1,
 		state.file_path,
+		mode,
 	)
 	fmt.sbprintln(&buffer)
 
@@ -208,19 +240,12 @@ render_state :: proc(state: State, grid: ^Grid) {
 	cell_row := min(state.cur_row + 1, grid.rows - 1)
 	cell_col := min(state.cur_col + 1, grid.cols - 1)
 	curr_cell := get_cell(grid, cell_row, cell_col)
-	switch cell in curr_cell {
-	case CellInt:
-		fmt.sbprintf(&buffer, "%d", cell.value)
-	case CellFunc:
-		if cell.error != "" do strings.write_string(&buffer, cell.error)
-		else do strings.write_string(&buffer, cell.formula)
-	case CellText:
-		strings.write_string(&buffer, cell.value)
-	case CellEmpty:
+	if state.mode == Mode.insert {
+		fmt.sbprint(&buffer, strings.to_string(state.formula_field))
+	} else {
+		fmt.sbprint(&buffer, cell_to_string(curr_cell))
 	}
-
-
-	fmt.sbprintln(&buffer, " ]\n")
+	fmt.sbprint(&buffer, "  ]\n\n")
 
 	// Write grid
 	char_width := 0
@@ -242,7 +267,28 @@ render_state :: proc(state: State, grid: ^Grid) {
 			is_header := row == 0 && column == state.cur_col + 1
 			is_legend := column == 0 && row == state.cur_row + 1
 			is_cur_cell := column == state.cur_col + 1 && row == state.cur_row + 1
-			if (is_cur_cell || is_header || is_legend) {
+			is_edit_cell :=
+				state.mode == Mode.insert &&
+				column == state.edit_col + 1 &&
+				row == state.edit_row + 1
+			is_in_selection := false
+			if state.cell_picking && state.picking_start_set {
+				min_row := min(state.cur_vis_row_start, state.cur_row)
+				max_row := max(state.cur_vis_row_start, state.cur_row)
+				min_col := min(state.cur_vis_col_start, state.cur_col)
+				max_col := max(state.cur_vis_col_start, state.cur_col)
+				is_in_selection =
+					row >= min_row + 1 &&
+					row <= max_row + 1 &&
+					column >= min_col + 1 &&
+					column <= max_col + 1
+			}
+
+			if is_edit_cell {
+				strings.write_string(&buffer, "{")
+			} else if is_in_selection {
+				strings.write_string(&buffer, "<")
+			} else if (is_cur_cell || is_header || is_legend) {
 				strings.write_string(&buffer, "[")
 			} else {
 				strings.write_string(&buffer, " ")
@@ -278,7 +324,11 @@ render_state :: proc(state: State, grid: ^Grid) {
 				}
 			}
 
-			if (is_cur_cell || is_header || is_legend) {
+			if is_edit_cell {
+				strings.write_string(&buffer, "}")
+			} else if is_in_selection {
+				strings.write_string(&buffer, ">")
+			} else if (is_cur_cell || is_header || is_legend) {
 				strings.write_string(&buffer, "]")
 			} else {
 				strings.write_string(&buffer, " ")

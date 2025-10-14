@@ -4,6 +4,31 @@ A terminal based spreadsheet editor and calculator.
 
 It allows you to quickly perform calculations on a spreadsheet - right in your terminal!
 
+## How-to
+
+### Basic Usage
+Open a file: `./spreadsheet sheet.csv` (or without arguments for a new untitled spreadsheet).
+
+**Navigation (normal mode):**
+- Move cursor: arrow keys or vim keys (`hjkl`)
+- Edit cell: press Enter
+- Save: press `s`
+- Quit: press `q`
+
+**Editing cells (insert mode):**
+- Type your value (integer, text, or formula starting with `=`)
+- Press Enter to commit and return to normal mode
+- Press ESC to cancel without saving
+- Press Backspace to delete characters
+
+**Cell picking (for formulas):**
+While in insert mode, press Ctrl+Space to enter picking mode. This lets you visually select cells to insert into your formula:
+1. Navigate to the cell you want (arrow keys or `hjkl`)
+2. Press Enter once to mark the start of selection
+3. For a single cell: press Enter again to insert it (e.g., `A1`)
+4. For a range: navigate to the end cell, then press Enter to insert the range (e.g., `A1:B3`)
+5. Press ESC to cancel picking and return to editing
+
 ## Functional cells
 ### Parsing
 For fun, the parsing of the formulas is done using Odin's own [tokenizer](https://pkg.odin-lang.org/core/odin/tokenizer/) and [parser](https://pkg.odin-lang.org/core/odin/parser/). This means that you are actually writing a subset of Odin that is valid Excel Formula Language.
@@ -31,6 +56,9 @@ A hand-rolled topological sort has been implemented for educational purposes, de
 - [ ] add function calling
 - [ ] add support for excel files (.xls & .xlsx)
 - [ ] add more cell types (strings, dates)
+    - [x] strings
+    - [ ] float
+    - [ ] dates
 - [ ] only reevaluate dependent cells
 - [ ] multi-thread independent evaluation
 

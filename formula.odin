@@ -214,6 +214,8 @@ find_deps :: proc(grid: ^Grid) -> map[string][dynamic]string {
 			rec_find(node.expr, collect_deps)
 		case ^ast.Paren_Expr:
 			rec_find(node.expr, collect_deps)
+		case ^ast.Basic_Lit:
+			// Literals (numbers, strings) have no dependencies
 		case ^ast.Call_Expr:
 			// Function calls like SUM(A1:A5)
 			panic("Function calls not implemented yet")

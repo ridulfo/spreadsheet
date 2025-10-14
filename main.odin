@@ -8,109 +8,54 @@ import "core:os"
 import "core:strconv"
 import "core:strings"
 
-None :: struct {}
-
-State :: struct {
-	cur_col, cur_row: int,
-	grid:             ^Grid,
-	file_path:        string,
+Mode :: enum {
+	normal, // Default navigation
+	insert, // Writing value or formula
+	visual, // For selecting
 }
+
+// The whole application's state
+//
+// Having all the state one place and rendering the whole state is that the
+// code becomes much easier to reason about. Every action by the user just
+// mutates the state.
+State :: struct {
+	// Current cell
+	cur_row, cur_col:                   int,
+
+	// Used when selecting a cell or a range
+	cur_vis_row_start, cur_vis_row_end: int,
+	cur_vis_col_start, cur_vis_col_end: int,
+
+	// The data
+	grid:                               ^Grid,
+
+	// Path to the file currently being edited
+	file_path:                          string,
+
+	// Editing mode
+	mode:                               Mode,
+
+	// Cell picking mode for formula references
+	// Not a `Mode` as it is closer to a sub-mode of insert.
+	cell_picking:                       bool,
+	picking_start_set:                  bool,
+
+	// Cell being edited (saved when entering insert mode)
+	edit_row, edit_col:                 int,
+
+	// String to show in formula
+	formula_field:                      strings.Builder,
+}
+
 
 state := State{}
 
-
-enter_value :: proc() -> string {
-	exit_raw_mode()
-	defer enter_raw_mode()
-
-	buf: [256]u8 = {}
-	n, err := os.read(os.stdin, buf[:])
-	if err != 0 || n == 0 {
-		fmt.eprintfln("Error reading input or EOF")
-		os.exit(1)
-	}
-
-	end := n > 0 && buf[n - 1] == '\n' ? n - 1 : n
-	return strings.clone(string(buf[:end]))
-}
-
-handle_keypress :: proc(c: u8) -> bool {
-	switch c {
-	case 'q':
-		return true
-	case 65:
-		fallthrough
-	case 'k':
-		state.cur_row = min(max(state.cur_row - 1, 0), state.grid.rows - 1)
-		// Trim empty rows from the bottom when moving up
-		trim_empty_cells(state.grid, state.cur_row, state.cur_col)
-	case 66:
-		fallthrough
-	case 'j':
-		if state.cur_row + 1 >= state.grid.rows {
-			insert_row(state.grid, state.grid.rows)
-		}
-		state.cur_row = min(max(state.cur_row + 1, 0), state.grid.rows - 1)
-	case 67:
-		fallthrough
-	case 'l':
-		if state.cur_col + 1 >= state.grid.cols {
-			insert_column(state.grid, state.grid.cols)
-		}
-		state.cur_col = min(max(state.cur_col + 1, 0), state.grid.cols - 1)
-	case 68:
-		fallthrough
-	case 'h':
-		state.cur_col = min(max(state.cur_col - 1, 0), state.grid.cols - 1)
-		// Trim empty columns from the right when moving left
-		trim_empty_cells(state.grid, state.cur_row, state.cur_col)
-	case 'i':
-		fallthrough
-	case 10:
-		// Enter
-		fmt.print("Enter value: ")
-		value := enter_value()
-		defer delete(value)
-		if len(value) > 0 && value[0] == '=' {
-			set_cell(
-				state.grid,
-				state.cur_row,
-				state.cur_col,
-				CellFunc{formula = strings.clone(value)},
-			)
-		} else {
-			parsed_value, ok := strconv.parse_int(value)
-			if ok {
-				set_cell(state.grid, state.cur_row, state.cur_col, CellInt{value = parsed_value})
-			} else {
-				set_cell(
-					state.grid,
-					state.cur_row,
-					state.cur_col,
-					CellText{value = strings.clone(value)},
-				)
-
-			}
-		}
-	case 's':
-		for {
-			fmt.printfln(
-				"Are you sure that you want to save the data to: %s? (Y/n/r=rename)",
-				state.file_path,
-			)
-			c := get_press()
-			if c == 'r' || c == 'R' {
-				fmt.print("Enter file name: ")
-				state.file_path = enter_value()
-				continue // Go back to prompt
-			} else if c != 'n' && c != 'N' {
-				save_data(state.grid, state.file_path)
-				fmt.println("Saved!")
-				break
-			} else do break
-		}
-	}
-	return false
+// Helper function to set the current cell in the global state
+set_cur_cell :: proc(row, col: int) {
+	state.cur_row = min(max(row, 0), state.grid.rows - 1)
+	state.cur_col = min(max(col, 0), state.grid.cols - 1)
+	cell := get_cell(state.grid, state.cur_row, state.cur_col)
 }
 
 
@@ -152,9 +97,13 @@ main :: proc() {
 		delete_grid(state.grid)
 	}
 
+	strings.builder_init(&state.formula_field)
+	defer strings.builder_destroy(&state.formula_field)
+
 	enter_raw_mode()
 	defer exit_raw_mode()
 
+	set_cur_cell(0, 0)
 	evaluate_grid(state.grid)
 
 	should_exit := false
