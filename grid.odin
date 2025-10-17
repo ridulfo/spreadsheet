@@ -272,7 +272,8 @@ render_state :: proc(state: State, grid: ^Grid) {
 				column == state.edit_col + 1 &&
 				row == state.edit_row + 1
 			is_in_selection := false
-			if state.mode == .insert && state.selecting && state.selected_first {
+			if state.selecting {
+				// Show selection for both visual mode and insert mode (cell picking)
 				min_row := min(state.select_row_start, state.cur_row)
 				max_row := max(state.select_row_start, state.cur_row)
 				min_col := min(state.select_col_start, state.cur_col)

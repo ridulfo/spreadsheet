@@ -413,3 +413,152 @@ test_dependent_formulas_chain :: proc(t: ^testing.T) {
 	testing.expect_value(t, cell_a5_func.formula, "=A4+A2")
 	testing.expect_value(t, cell_a5_func.value, 35)
 }
+
+@(test)
+test_enter_visual_mode :: proc(t: ^testing.T) {
+	state := make_test_state()
+	defer cleanup_test_state(&state)
+
+	set_cur_cell(&state, 2, 2)
+	testing.expect_value(t, state.mode, Mode.normal)
+
+	// Press 'v' to enter visual mode
+	handle_keypress(&state, 'v')
+
+	testing.expect_value(t, state.mode, Mode.visual)
+	testing.expect_value(t, state.selecting, true)
+	testing.expect_value(t, state.select_row_start, 2)
+	testing.expect_value(t, state.select_col_start, 2)
+	testing.expect_value(t, state.select_row_end, 2)
+	testing.expect_value(t, state.select_col_end, 2)
+}
+
+@(test)
+test_visual_mode_navigation :: proc(t: ^testing.T) {
+	state := make_test_state()
+	defer cleanup_test_state(&state)
+
+	set_cur_cell(&state, 2, 2)
+
+	// Enter visual mode
+	handle_keypress(&state, 'v')
+	testing.expect_value(t, state.mode, Mode.visual)
+
+	// Move right
+	handle_keypress(&state, 'l')
+	testing.expect_value(t, state.cur_row, 2)
+	testing.expect_value(t, state.cur_col, 3)
+	testing.expect_value(t, state.select_row_end, 2)
+	testing.expect_value(t, state.select_col_end, 3)
+
+	// Move down
+	handle_keypress(&state, 'j')
+	testing.expect_value(t, state.cur_row, 3)
+	testing.expect_value(t, state.cur_col, 3)
+	testing.expect_value(t, state.select_row_end, 3)
+	testing.expect_value(t, state.select_col_end, 3)
+
+	// Selection start should remain unchanged
+	testing.expect_value(t, state.select_row_start, 2)
+	testing.expect_value(t, state.select_col_start, 2)
+}
+
+@(test)
+test_visual_mode_exit_with_v :: proc(t: ^testing.T) {
+	state := make_test_state()
+	defer cleanup_test_state(&state)
+
+	set_cur_cell(&state, 2, 2)
+
+	// Enter visual mode
+	handle_keypress(&state, 'v')
+	testing.expect_value(t, state.mode, Mode.visual)
+
+	// Exit visual mode with 'v'
+	handle_keypress(&state, 'v')
+	testing.expect_value(t, state.mode, Mode.normal)
+	testing.expect_value(t, state.selecting, false)
+}
+
+@(test)
+test_visual_mode_exit_with_enter :: proc(t: ^testing.T) {
+	state := make_test_state()
+	defer cleanup_test_state(&state)
+
+	set_cur_cell(&state, 2, 2)
+
+	// Enter visual mode
+	handle_keypress(&state, 'v')
+	testing.expect_value(t, state.mode, Mode.visual)
+
+	// Move to create selection
+	handle_keypress(&state, 'l')
+	handle_keypress(&state, 'j')
+
+	// Exit with Enter
+	handle_keypress(&state, 10) // Enter
+	testing.expect_value(t, state.mode, Mode.normal)
+	testing.expect_value(t, state.selecting, false)
+	// Selection bounds should be saved
+	testing.expect_value(t, state.select_row_start, 2)
+	testing.expect_value(t, state.select_col_start, 2)
+	testing.expect_value(t, state.select_row_end, 3)
+	testing.expect_value(t, state.select_col_end, 3)
+}
+
+@(test)
+test_visual_mode_arrow_keys :: proc(t: ^testing.T) {
+	state := make_test_state()
+	defer cleanup_test_state(&state)
+
+	set_cur_cell(&state, 5, 5)
+
+	// Enter visual mode
+	handle_keypress(&state, 'v')
+
+	// Test arrow up (65)
+	handle_keypress(&state, 27) // ESC
+	handle_keypress(&state, 91) // [
+	handle_keypress(&state, 65) // A (up arrow)
+	testing.expect_value(t, state.cur_row, 4)
+
+	// Test arrow down (66)
+	handle_keypress(&state, 27) // ESC
+	handle_keypress(&state, 91) // [
+	handle_keypress(&state, 66) // B (down arrow)
+	testing.expect_value(t, state.cur_row, 5)
+
+	// Test arrow right (67)
+	handle_keypress(&state, 27) // ESC
+	handle_keypress(&state, 91) // [
+	handle_keypress(&state, 67) // C (right arrow)
+	testing.expect_value(t, state.cur_col, 6)
+
+	// Test arrow left (68)
+	handle_keypress(&state, 27) // ESC
+	handle_keypress(&state, 91) // [
+	handle_keypress(&state, 68) // D (left arrow)
+	testing.expect_value(t, state.cur_col, 5)
+
+	// Should still be in visual mode
+	testing.expect_value(t, state.mode, Mode.visual)
+}
+
+@(test)
+test_visual_mode_yank_exits :: proc(t: ^testing.T) {
+	state := make_test_state()
+	defer cleanup_test_state(&state)
+
+	set_cur_cell(&state, 0, 0)
+
+	// Enter visual mode
+	handle_keypress(&state, 'v')
+	testing.expect_value(t, state.mode, Mode.visual)
+
+	// Press 'y' to yank (copy)
+	handle_keypress(&state, 'y')
+
+	// Should have exited visual mode
+	testing.expect_value(t, state.mode, Mode.normal)
+	testing.expect_value(t, state.selecting, false)
+}

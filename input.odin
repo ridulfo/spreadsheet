@@ -1,9 +1,20 @@
 package main
 
+import "core:c"
 import "core:fmt"
 import "core:os"
 import "core:strconv"
 import "core:strings"
+
+foreign import libc "system:c"
+
+@(default_calling_convention = "c")
+foreign libc {
+	system :: proc(command: cstring) -> c.int ---
+	popen :: proc(command: cstring, mode: cstring) -> rawptr ---
+	pclose :: proc(stream: rawptr) -> c.int ---
+	fgets :: proc(str: [^]u8, size: c.int, stream: rawptr) -> [^]u8 ---
+}
 
 // Reads a line of text from stdin (exits raw mode temporarily)
 enter_value :: proc() -> string {
@@ -213,10 +224,14 @@ handle_normal_mode :: proc(state: ^State, c: u8) -> bool {
 		}
 	case 'v':
 		state.mode = Mode.visual
+		state.selecting = true
 		state.select_row_start = cur_row
 		state.select_col_start = cur_col
-		state.select_row_end = -1
-		state.select_col_end = -1
+		state.select_row_end = cur_row
+		state.select_col_end = cur_col
+	case 'p':
+		// Paste from clipboard
+		paste_from_clipboard(state)
 	case 65, 'k':
 		set_cur_cell(state, cur_row - 1, cur_col)
 		trim_empty_cells(state.grid, state.cur_row, state.cur_col)
@@ -255,6 +270,177 @@ handle_normal_mode :: proc(state: ^State, c: u8) -> bool {
 	return false
 }
 
+// Pastes from system clipboard (TSV format) starting at current cell
+paste_from_clipboard :: proc(state: ^State) {
+	// Execute wl-paste and capture output
+	pipe := popen("wl-paste", "r")
+	if pipe == nil {
+		return
+	}
+	defer pclose(pipe)
+
+	// Read all clipboard data
+	clipboard_data: strings.Builder
+	strings.builder_init(&clipboard_data)
+	defer strings.builder_destroy(&clipboard_data)
+
+	buf: [4096]u8
+	for {
+		result := fgets(raw_data(buf[:]), c.int(len(buf)), pipe)
+		if result == nil {
+			break
+		}
+		line := string(cstring(raw_data(buf[:])))
+		strings.write_string(&clipboard_data, line)
+	}
+
+	data := strings.to_string(clipboard_data)
+	if len(data) == 0 {
+		return
+	}
+
+	// Parse TSV data and insert into grid
+	rows := strings.split(data, "\n", context.temp_allocator)
+	start_row := state.cur_row
+	start_col := state.cur_col
+
+	for row_data, row_offset in rows {
+		if len(row_data) == 0 {
+			continue
+		}
+
+		cols := strings.split(row_data, "\t", context.temp_allocator)
+		target_row := start_row + row_offset
+
+		// Expand grid if needed
+		for target_row >= state.grid.rows {
+			insert_row(state.grid, state.grid.rows)
+		}
+
+		for col_data, col_offset in cols {
+			target_col := start_col + col_offset
+
+			// Expand grid if needed
+			for target_col >= state.grid.cols {
+				insert_column(state.grid, state.grid.cols)
+			}
+
+			// Parse and insert cell value
+			if len(col_data) > 0 {
+				// Try to parse as integer
+				if parsed_int, ok := strconv.parse_int(col_data); ok {
+					set_cell(state.grid, target_row, target_col, CellInt{value = parsed_int})
+				} else {
+					// Store as text
+					set_cell(state.grid, target_row, target_col, CellText{value = strings.clone(col_data)})
+				}
+			}
+		}
+	}
+}
+
+// Copies selected cells to system clipboard as TSV
+yank_selection :: proc(state: ^State) {
+	// Calculate selection bounds
+	min_row := min(state.select_row_start, state.select_row_end)
+	max_row := max(state.select_row_start, state.select_row_end)
+	min_col := min(state.select_col_start, state.select_col_end)
+	max_col := max(state.select_col_start, state.select_col_end)
+
+	// Build TSV string
+	builder: strings.Builder
+	strings.builder_init(&builder)
+	defer strings.builder_destroy(&builder)
+
+	for row in min_row ..= max_row {
+		for col in min_col ..= max_col {
+			cell := get_cell(state.grid, row, col)
+
+			// Convert cell to string value
+			switch c in cell {
+			case CellInt:
+				fmt.sbprintf(&builder, "%d", c.value)
+			case CellFunc:
+				// For formulas, copy the evaluated value
+				fmt.sbprintf(&builder, "%d", c.value)
+			case CellText:
+				strings.write_string(&builder, c.value)
+			case CellEmpty:
+				// Empty cell
+			}
+
+			// Add tab separator between columns (except last column)
+			if col < max_col {
+				strings.write_string(&builder, "\t")
+			}
+		}
+		// Add newline between rows (except last row)
+		if row < max_row {
+			strings.write_string(&builder, "\n")
+		}
+	}
+
+	// Pipe to wl-copy via shell
+	data := strings.to_string(builder)
+	cmd := fmt.tprintf("printf '%%s' '%s' | wl-copy", data)
+	system(strings.clone_to_cstring(cmd, context.temp_allocator))
+}
+
+handle_visual_mode :: proc(state: ^State, c: u8) -> bool {
+	cur_row, cur_col := state.cur_row, state.cur_col
+
+	switch c {
+	case 10:
+		// Enter - exit visual mode, keeping selection
+		state.mode = Mode.normal
+		state.selecting = false
+		state.select_row_end = cur_row
+		state.select_col_end = cur_col
+	case 'y':
+		// Yank (copy) selection to clipboard
+		state.select_row_end = cur_row
+		state.select_col_end = cur_col
+		yank_selection(state)
+		state.mode = Mode.normal
+		state.selecting = false
+	case 'v', 'q':
+		// 'v' or 'q' - exit visual mode
+		state.mode = Mode.normal
+		state.selecting = false
+	case 65, 'k':
+		// Move up
+		set_cur_cell(state, cur_row - 1, cur_col)
+		state.select_row_end = state.cur_row
+		state.select_col_end = state.cur_col
+	case 66, 'j':
+		// Move down
+		if state.cur_row + 1 >= state.grid.rows {
+			insert_row(state.grid, state.grid.rows)
+		}
+		set_cur_cell(state, cur_row + 1, cur_col)
+		state.select_row_end = state.cur_row
+		state.select_col_end = state.cur_col
+	case 67, 'l':
+		// Move right
+		if state.cur_col + 1 >= state.grid.cols {
+			insert_column(state.grid, state.grid.cols)
+		}
+		set_cur_cell(state, cur_row, cur_col + 1)
+		state.select_row_end = state.cur_row
+		state.select_col_end = state.cur_col
+	case 68, 'h':
+		// Move left
+		set_cur_cell(state, cur_row, cur_col - 1)
+		state.select_row_end = state.cur_row
+		state.select_col_end = state.cur_col
+	case 27, 91:
+		// ESC and '[' character from escape sequences - ignore
+		// (these are part of arrow key sequences, not standalone commands)
+	}
+
+	return false
+}
+
 // Routes keypresses to the appropriate mode handler
 //
 // Checks current mode and delegates to the corresponding handler. Returns true
@@ -266,7 +452,7 @@ handle_keypress :: proc(state: ^State, c: u8) -> bool {
 	case .insert:
 		return handle_insert_mode(state, c)
 	case .visual:
-		return false // Not implemented yet
+		return handle_visual_mode(state, c)
 	}
 	return false
 }
