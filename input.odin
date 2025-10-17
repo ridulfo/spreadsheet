@@ -29,7 +29,7 @@ enter_value :: proc() -> string {
 // second Enter marks the end and inserts the cell reference (or range) into
 // formula_field. Arrow keys navigate while showing the selection. ESC cancels
 // and returns cursor to edit cell.
-handle_cell_picking :: proc(c: u8) -> bool {
+handle_cell_picking :: proc(state: ^State, c: u8) -> bool {
 	cur_row, cur_col := state.cur_row, state.cur_col
 
 	if c == 10 {
@@ -67,7 +67,7 @@ handle_cell_picking :: proc(c: u8) -> bool {
 			// Exit cell picking mode and restore cursor to editing cell
 			state.cell_picking = false
 			state.picking_start_set = false
-			set_cur_cell(state.edit_row, state.edit_col)
+			set_cur_cell(state, state.edit_row, state.edit_col)
 		}
 		return false
 	}
@@ -76,25 +76,25 @@ handle_cell_picking :: proc(c: u8) -> bool {
 		// Arrow keys move cursor
 		switch c {
 		case 65, 'k':
-			set_cur_cell(cur_row - 1, cur_col)
+			set_cur_cell(state, cur_row - 1, cur_col)
 		case 66, 'j':
 			if state.cur_row + 1 >= state.grid.rows {
 				insert_row(state.grid, state.grid.rows)
 			}
-			set_cur_cell(cur_row + 1, cur_col)
+			set_cur_cell(state, cur_row + 1, cur_col)
 		case 67, 'l':
 			if state.cur_col + 1 >= state.grid.cols {
 				insert_column(state.grid, state.grid.cols)
 			}
-			set_cur_cell(cur_row, cur_col + 1)
+			set_cur_cell(state, cur_row, cur_col + 1)
 		case 68, 'h':
-			set_cur_cell(cur_row, cur_col - 1)
+			set_cur_cell(state, cur_row, cur_col - 1)
 		}
 	} else if c == 27 {
 		// ESC - exit cell picking mode
 		state.cell_picking = false
 		state.picking_start_set = false
-		set_cur_cell(state.edit_row, state.edit_col)
+		set_cur_cell(state, state.edit_row, state.edit_col)
 	} else if c == 91 {
 		// '[' character from escape sequences - ignore
 	}
@@ -109,7 +109,7 @@ handle_cell_picking :: proc(c: u8) -> bool {
 // as a formula (starts with =), int, or text, then writes to grid and returns
 // to normal mode. Backspace deletes characters. ESC cancels without saving and
 // clears formula_field.
-handle_insert_mode :: proc(c: u8) -> bool {
+handle_insert_mode :: proc(state: ^State, c: u8) -> bool {
 	if c == 0 {
 		// Control+Space toggles cell picking mode
 		state.cell_picking = !state.cell_picking
@@ -118,13 +118,13 @@ handle_insert_mode :: proc(c: u8) -> bool {
 	}
 
 	if state.cell_picking {
-		return handle_cell_picking(c)
+		return handle_cell_picking(state, c)
 	}
 
 	if c == 10 {
 		// Enter - commit the value and exit insert mode
 		state.mode = Mode.normal
-		set_cur_cell(state.edit_row, state.edit_col)
+		set_cur_cell(state, state.edit_row, state.edit_col)
 		value := strings.to_string(state.formula_field)
 
 		// Free old cell data if it was a string type
@@ -132,11 +132,11 @@ handle_insert_mode :: proc(c: u8) -> bool {
 		switch c in old_cell {
 		case CellFunc:
 			delete(c.formula) // formula is heap-allocated via strings.clone()
-			// Don't delete c.error - it's always a string literal
+		// Don't delete c.error - it's always a string literal
 		case CellText:
 			delete(c.value) // value is heap-allocated via strings.clone()
 		case CellInt, CellEmpty:
-			// No cleanup needed
+		// No cleanup needed
 		}
 
 		if len(value) > 0 && value[0] == '=' {
@@ -169,7 +169,7 @@ handle_insert_mode :: proc(c: u8) -> bool {
 		// ESC - exit insert mode without saving
 		state.mode = Mode.normal
 		strings.builder_reset(&state.formula_field)
-		set_cur_cell(state.edit_row, state.edit_col)
+		set_cur_cell(state, state.edit_row, state.edit_col)
 	} else if c == 91 {
 		// '[' character from escape sequences - ignore
 	} else {
@@ -186,7 +186,7 @@ handle_insert_mode :: proc(c: u8) -> bool {
 // when moving left/up). Enter switches to insert mode, saves current position
 // to edit_row/col, and prepopulates formula_field with the current cell's
 // content. 's' opens save dialog, 'q' quits the app.
-handle_normal_mode :: proc(c: u8) -> bool {
+handle_normal_mode :: proc(state: ^State, c: u8) -> bool {
 	cur_row, cur_col := state.cur_row, state.cur_col
 
 	if c == 10 {
@@ -216,20 +216,20 @@ handle_normal_mode :: proc(c: u8) -> bool {
 	case 'q':
 		return true
 	case 65, 'k':
-		set_cur_cell(cur_row - 1, cur_col)
+		set_cur_cell(state, cur_row - 1, cur_col)
 		trim_empty_cells(state.grid, state.cur_row, state.cur_col)
 	case 66, 'j':
 		if state.cur_row + 1 >= state.grid.rows {
 			insert_row(state.grid, state.grid.rows)
 		}
-		set_cur_cell(cur_row + 1, cur_col)
+		set_cur_cell(state, cur_row + 1, cur_col)
 	case 67, 'l':
 		if state.cur_col + 1 >= state.grid.cols {
 			insert_column(state.grid, state.grid.cols)
 		}
-		set_cur_cell(cur_row, cur_col + 1)
+		set_cur_cell(state, cur_row, cur_col + 1)
 	case 68, 'h':
-		set_cur_cell(cur_row, cur_col - 1)
+		set_cur_cell(state, cur_row, cur_col - 1)
 		trim_empty_cells(state.grid, state.cur_row, state.cur_col)
 	case 's':
 		for {
@@ -257,12 +257,12 @@ handle_normal_mode :: proc(c: u8) -> bool {
 //
 // Checks current mode and delegates to the corresponding handler. Returns true
 // if the app should quit (propagated from mode handlers).
-handle_keypress :: proc(c: u8) -> bool {
+handle_keypress :: proc(state: ^State, c: u8) -> bool {
 	switch state.mode {
 	case .normal:
-		return handle_normal_mode(c)
+		return handle_normal_mode(state, c)
 	case .insert:
-		return handle_insert_mode(c)
+		return handle_insert_mode(state, c)
 	case .visual:
 		return false // Not implemented yet
 	}

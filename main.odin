@@ -51,8 +51,8 @@ State :: struct {
 
 state := State{}
 
-// Helper function to set the current cell in the global state
-set_cur_cell :: proc(row, col: int) {
+// Helper function to set the current cell
+set_cur_cell :: proc(state: ^State, row, col: int) {
 	state.cur_row = min(max(row, 0), state.grid.rows - 1)
 	state.cur_col = min(max(col, 0), state.grid.cols - 1)
 	cell := get_cell(state.grid, state.cur_row, state.cur_col)
@@ -103,14 +103,14 @@ main :: proc() {
 	enter_raw_mode()
 	defer exit_raw_mode()
 
-	set_cur_cell(0, 0)
+	set_cur_cell(&state, 0, 0)
 	evaluate_grid(state.grid)
 
 	should_exit := false
 	for (!should_exit) {
 		render_state(state, state.grid)
 		c := get_press()
-		should_exit = handle_keypress(c)
+		should_exit = handle_keypress(&state, c)
 		evaluate_grid(state.grid)
 	}
 }
