@@ -220,7 +220,7 @@ render_state :: proc(state: State, grid: ^Grid) {
 	case .visual:
 		mode = "Visual"
 	}
-	if state.cell_picking do mode = "Picking"
+	if state.mode == .insert && state.selecting do mode = "Picking"
 
 	// Write status line
 	fmt.sbprintf(
@@ -272,11 +272,11 @@ render_state :: proc(state: State, grid: ^Grid) {
 				column == state.edit_col + 1 &&
 				row == state.edit_row + 1
 			is_in_selection := false
-			if state.cell_picking && state.picking_start_set {
-				min_row := min(state.cur_vis_row_start, state.cur_row)
-				max_row := max(state.cur_vis_row_start, state.cur_row)
-				min_col := min(state.cur_vis_col_start, state.cur_col)
-				max_col := max(state.cur_vis_col_start, state.cur_col)
+			if state.mode == .insert && state.selecting && state.selected_first {
+				min_row := min(state.select_row_start, state.cur_row)
+				max_row := max(state.select_row_start, state.cur_row)
+				min_col := min(state.select_col_start, state.cur_col)
+				max_col := max(state.select_col_start, state.cur_col)
 				is_in_selection =
 					row >= min_row + 1 &&
 					row <= max_row + 1 &&

@@ -21,31 +21,27 @@ Mode :: enum {
 // mutates the state.
 State :: struct {
 	// Current cell
-	cur_row, cur_col:                   int,
+	cur_row, cur_col:                 int,
 
 	// Used when selecting a cell or a range
-	cur_vis_row_start, cur_vis_row_end: int,
-	cur_vis_col_start, cur_vis_col_end: int,
-
-	// The data
-	grid:                               ^Grid,
-
-	// Path to the file currently being edited
-	file_path:                          string,
-
-	// Editing mode
-	mode:                               Mode,
-
-	// Cell picking mode for formula references
-	// Not a `Mode` as it is closer to a sub-mode of insert.
-	cell_picking:                       bool,
-	picking_start_set:                  bool,
+	select_row_start, select_row_end: int,
+	select_col_start, select_col_end: int,
+	selecting, selected_first:        bool,
 
 	// Cell being edited (saved when entering insert mode)
-	edit_row, edit_col:                 int,
+	edit_row, edit_col:               int,
+
+	// The data
+	grid:                             ^Grid,
+
+	// Path to the file currently being edited
+	file_path:                        string,
+
+	// Editing mode
+	mode:                             Mode,
 
 	// String to show in formula
-	formula_field:                      strings.Builder,
+	formula_field:                    strings.Builder,
 }
 
 
@@ -107,10 +103,11 @@ main :: proc() {
 	evaluate_grid(state.grid)
 
 	should_exit := false
-	for (!should_exit) {
+	for {
 		render_state(state, state.grid)
 		c := get_press()
 		should_exit = handle_keypress(&state, c)
+		if should_exit do break
 		evaluate_grid(state.grid)
 	}
 }

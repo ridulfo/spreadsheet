@@ -24,7 +24,7 @@ enter_value :: proc() -> string {
 
 // Handles navigation and selection while picking cells for formula references
 //
-// Uses cur_vis_* to track the selection range. picking_start_set indicates
+// Uses select_* to track the selection range. `selecting` indicates
 // whether we've started selecting. First Enter marks the start position,
 // second Enter marks the end and inserts the cell reference (or range) into
 // formula_field. Arrow keys navigate while showing the selection. ESC cancels
@@ -34,29 +34,29 @@ handle_cell_picking :: proc(state: ^State, c: u8) -> bool {
 
 	if c == 10 {
 		// Enter in cell picking mode
-		if !state.picking_start_set {
+		if !state.selected_first {
 			// First Enter: mark start of selection
-			state.cur_vis_row_start = cur_row
-			state.cur_vis_col_start = cur_col
-			state.picking_start_set = true
+			state.select_row_start = cur_row
+			state.select_col_start = cur_col
+			state.selected_first = true
 		} else {
 			// Second Enter: mark end and insert reference
-			state.cur_vis_row_end = cur_row
-			state.cur_vis_col_end = cur_col
+			state.select_row_end = cur_row
+			state.select_col_end = cur_col
 
 			// Insert cell reference or range
-			start_col := column_to_column_label(state.cur_vis_col_start, context.temp_allocator)
-			start_row := fmt.tprintf("%d", state.cur_vis_row_start + 1)
+			start_col := column_to_column_label(state.select_col_start, context.temp_allocator)
+			start_row := fmt.tprintf("%d", state.select_row_start + 1)
 
-			if state.cur_vis_row_start == state.cur_vis_row_end &&
-			   state.cur_vis_col_start == state.cur_vis_col_end {
+			if state.select_row_start == state.select_row_end &&
+			   state.select_col_start == state.select_col_end {
 				// Single cell
 				strings.write_string(&state.formula_field, start_col)
 				strings.write_string(&state.formula_field, start_row)
 			} else {
 				// Range
-				end_col := column_to_column_label(state.cur_vis_col_end, context.temp_allocator)
-				end_row := fmt.tprintf("%d", state.cur_vis_row_end + 1)
+				end_col := column_to_column_label(state.select_col_end, context.temp_allocator)
+				end_row := fmt.tprintf("%d", state.select_row_end + 1)
 				strings.write_string(&state.formula_field, start_col)
 				strings.write_string(&state.formula_field, start_row)
 				strings.write_string(&state.formula_field, ":")
@@ -65,8 +65,8 @@ handle_cell_picking :: proc(state: ^State, c: u8) -> bool {
 			}
 
 			// Exit cell picking mode and restore cursor to editing cell
-			state.cell_picking = false
-			state.picking_start_set = false
+			state.selecting = false
+			state.selected_first = false
 			set_cur_cell(state, state.edit_row, state.edit_col)
 		}
 		return false
@@ -92,8 +92,8 @@ handle_cell_picking :: proc(state: ^State, c: u8) -> bool {
 		}
 	} else if c == 27 {
 		// ESC - exit cell picking mode
-		state.cell_picking = false
-		state.picking_start_set = false
+		state.selecting = false
+		state.selected_first = false
 		set_cur_cell(state, state.edit_row, state.edit_col)
 	} else if c == 91 {
 		// '[' character from escape sequences - ignore
@@ -112,12 +112,12 @@ handle_cell_picking :: proc(state: ^State, c: u8) -> bool {
 handle_insert_mode :: proc(state: ^State, c: u8) -> bool {
 	if c == 0 {
 		// Control+Space toggles cell picking mode
-		state.cell_picking = !state.cell_picking
-		state.picking_start_set = false
+		state.selecting = !state.selecting
+		state.selected_first = false
 		return false
 	}
 
-	if state.cell_picking {
+	if state.selecting {
 		return handle_cell_picking(state, c)
 	}
 
@@ -189,7 +189,10 @@ handle_insert_mode :: proc(state: ^State, c: u8) -> bool {
 handle_normal_mode :: proc(state: ^State, c: u8) -> bool {
 	cur_row, cur_col := state.cur_row, state.cur_col
 
-	if c == 10 {
+	switch c {
+	case 'q':
+		return true
+	case 10:
 		// Enter - switch to insert mode
 		state.mode = Mode.insert
 		state.edit_row = cur_row
@@ -208,13 +211,12 @@ handle_normal_mode :: proc(state: ^State, c: u8) -> bool {
 		case CellEmpty:
 		// Leave empty
 		}
-
-		return false
-	}
-
-	switch c {
-	case 'q':
-		return true
+	case 'v':
+		state.mode = Mode.visual
+		state.select_row_start = cur_row
+		state.select_col_start = cur_col
+		state.select_row_end = -1
+		state.select_col_end = -1
 	case 65, 'k':
 		set_cur_cell(state, cur_row - 1, cur_col)
 		trim_empty_cells(state.grid, state.cur_row, state.cur_col)

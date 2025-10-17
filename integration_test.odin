@@ -10,8 +10,8 @@ make_test_state :: proc() -> State {
 	state.grid = new_grid()
 	state.file_path = "test.csv"
 	state.mode = .normal
-	state.cell_picking = false
-	state.picking_start_set = false
+	state.selecting = false
+	state.selected_first = false
 	strings.builder_init(&state.formula_field)
 	return state
 }
