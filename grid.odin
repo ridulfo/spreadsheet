@@ -4,15 +4,15 @@ import "core:math"
 import "core:strings"
 
 
-CellInt :: struct {
-	value: int,
+CellNumeric :: struct {
+	value: f64,
 }
 
 CellEmpty :: struct {}
 
 CellFunc :: struct {
 	formula: string,
-	value:   int,
+	value:   f64,
 	error:   string,
 }
 
@@ -21,7 +21,7 @@ CellText :: struct {
 }
 
 Cell :: union {
-	CellInt,
+	CellNumeric,
 	CellFunc,
 	CellText,
 	CellEmpty,
@@ -47,10 +47,24 @@ set_cell :: proc(grid: ^Grid, row: int, col: int, value: Cell) {
 cell_to_string :: proc(cell: Cell) -> string {
 	to_return: string
 	switch cell in cell {
-	case CellInt:
-		to_return = fmt.tprintf("%d", cell.value)
+	case CellNumeric:
+		if cell.value != math.trunc(cell.value) {
+			// Contains decimal places
+			to_return = fmt.tprintf("%f", cell.value)
+		} else {
+			// No decimal places
+			to_return = fmt.tprintf("%d", i64(cell.value))
+		}
 	case CellFunc:
-		to_return = cell.error != "" ? cell.error : cell.formula
+		if cell.error != "" {
+			to_return = cell.error
+		} else if cell.value != math.trunc(cell.value) {
+			// Contains decimal places
+			to_return = fmt.tprintf("%f", cell.value)
+		} else {
+			// No decimal places
+			to_return = fmt.tprintf("%d", i64(cell.value))
+		}
 	case CellText:
 		to_return = cell.value
 	case CellEmpty:
@@ -202,7 +216,7 @@ render_state :: proc(state: State, grid: ^Grid) {
 	// Add left legend
 	legend := make([]Cell, grid.rows)
 	defer delete(legend)
-	for _, i in legend do legend[i] = CellInt{i}
+	for _, i in legend do legend[i] = CellNumeric{f64(i)}
 	insert_column(grid, 0, legend)
 
 	fmt.printfln("row %d, col %d", grid.rows, grid.cols)
@@ -243,7 +257,15 @@ render_state :: proc(state: State, grid: ^Grid) {
 	if state.mode == Mode.insert {
 		fmt.sbprint(&buffer, strings.to_string(state.formula_field))
 	} else {
-		fmt.sbprint(&buffer, cell_to_string(curr_cell))
+		// Show formula for func cells, value for others
+		switch c in curr_cell {
+		case CellFunc:
+			fmt.sbprint(&buffer, c.formula)
+		case CellNumeric, CellText, CellEmpty:
+			cell_str := cell_to_string(curr_cell)
+			defer delete(cell_str)
+			fmt.sbprint(&buffer, cell_str)
+		}
 	}
 	fmt.sbprint(&buffer, "  ]\n\n")
 
@@ -273,16 +295,22 @@ render_state :: proc(state: State, grid: ^Grid) {
 				row == state.edit_row + 1
 			is_in_selection := false
 			if state.selecting {
-				// Show selection for both visual mode and insert mode (cell picking)
-				min_row := min(state.select_row_start, state.cur_row)
-				max_row := max(state.select_row_start, state.cur_row)
-				min_col := min(state.select_col_start, state.cur_col)
-				max_col := max(state.select_col_start, state.cur_col)
-				is_in_selection =
-					row >= min_row + 1 &&
-					row <= max_row + 1 &&
-					column >= min_col + 1 &&
-					column <= max_col + 1
+				// In visual mode, always show selection
+				// In insert mode (cell picking), only show after first Enter press
+				show_selection :=
+					state.mode == Mode.visual ||
+					(state.mode == Mode.insert && state.selected_first)
+				if show_selection {
+					min_row := min(state.select_row_start, state.cur_row)
+					max_row := max(state.select_row_start, state.cur_row)
+					min_col := min(state.select_col_start, state.cur_col)
+					max_col := max(state.select_col_start, state.cur_col)
+					is_in_selection =
+						row >= min_row + 1 &&
+						row <= max_row + 1 &&
+						column >= min_col + 1 &&
+						column <= max_col + 1
+				}
 			}
 
 			if is_edit_cell {
@@ -295,35 +323,25 @@ render_state :: proc(state: State, grid: ^Grid) {
 				strings.write_string(&buffer, " ")
 			}
 
-			switch cell in cell {
-			case CellInt:
-				as_str := fmt.tprintf("%d", cell.value)
-				for _ in 0 ..< (column_widths[column] - len(as_str)) {
-					strings.write_string(&buffer, " ")
+			// For func cells on the current cell, show formula instead of value
+			as_str: string
+			if is_cur_cell {
+				switch c in cell {
+				case CellFunc:
+					as_str = strings.clone(c.formula)
+				case CellNumeric, CellText, CellEmpty:
+					as_str = cell_to_string(cell)
 				}
-				strings.write_string(&buffer, as_str)
-			case CellFunc:
-				as_str: string
-				if is_cur_cell do as_str = cell.formula
-				else do as_str = fmt.tprintf("%d", cell.value)
-
-				for _ in 0 ..< (column_widths[column] - len(as_str)) {
-					strings.write_string(&buffer, " ")
-				}
-				strings.write_string(&buffer, as_str)
-			case CellText:
-				as_str := cell.value
-
-				for _ in 0 ..< (column_widths[column] - len(as_str)) {
-					strings.write_string(&buffer, " ")
-				}
-				strings.write_string(&buffer, as_str)
-
-			case CellEmpty:
-				for _ in 0 ..< (column_widths[column]) {
-					strings.write_string(&buffer, " ")
-				}
+			} else {
+				as_str = cell_to_string(cell)
 			}
+			defer delete(as_str)
+
+			for _ in 0 ..< (column_widths[column] - len(as_str)) {
+				strings.write_string(&buffer, " ")
+			}
+			strings.write_string(&buffer, as_str)
+
 
 			if is_edit_cell {
 				strings.write_string(&buffer, "}")
@@ -397,7 +415,7 @@ trim_empty_cells :: proc(grid: ^Grid, preserve_rows, preserve_cols: int) {
 		for col_idx in 0 ..< grid.cols {
 			cell := get_cell(grid, row_idx, col_idx)
 			switch _ in cell {
-			case CellInt:
+			case CellNumeric:
 				last_col = max(last_col, col_idx)
 				last_row = max(last_row, row_idx)
 			case CellFunc:
@@ -447,22 +465,17 @@ max_column_widths :: proc(grid: ^Grid, cur_row: int, cur_col: int) -> []int {
 		for row in 0 ..< grid.rows {
 			cell := get_cell(grid, row, column)
 			is_cur_cell := column == cur_col + 1 && row == cur_row + 1
+			as_str := cell_to_string(cell)
+			defer delete(as_str)
+
 			switch cell in cell {
-			case CellInt:
-				as_str := fmt.tprintf("%d", cell.value)
+			case CellNumeric:
 				max_col_width = max(len(as_str), max_col_width)
 			case CellFunc:
-				length: int
-				if is_cur_cell {
-					length = len(cell.formula)
-				} else {
-					as_str := fmt.tprintf("%d", cell.value)
-					length = len(as_str)
-				}
+				length := is_cur_cell ? len(cell.formula) : len(as_str)
 				max_col_width = max(length, max_col_width)
 			case CellText:
-				length := len(cell.value)
-				max_col_width = max(length, max_col_width)
+				max_col_width = max(len(as_str), max_col_width)
 
 			case CellEmpty:
 				continue

@@ -65,9 +65,9 @@ test_insert_number :: proc(t: ^testing.T) {
 
 	// Check the cell contains the integer 42
 	cell := get_cell(state.grid, 0, 0)
-	cell_int, ok := cell.(CellInt)
+	cell_f64, ok := cell.(CellNumeric)
 	testing.expect(t, ok, "Cell should be CellInt")
-	testing.expect_value(t, cell_int.value, 42)
+	testing.expect_value(t, cell_f64.value, 42)
 }
 
 @(test)
@@ -223,7 +223,7 @@ test_edit_existing_cell :: proc(t: ^testing.T) {
 	defer cleanup_test_state(&state)
 
 	// Set up initial cell value
-	set_cell(state.grid, 0, 0, CellInt{value = 100})
+	set_cell(state.grid, 0, 0, CellNumeric{value = 100})
 	set_cur_cell(&state, 0, 0)
 
 	// Enter insert mode - should populate formula field with current value
@@ -245,9 +245,9 @@ test_edit_existing_cell :: proc(t: ^testing.T) {
 
 	// Check updated value
 	cell := get_cell(state.grid, 0, 0)
-	cell_int, ok := cell.(CellInt)
+	cell_f64, ok := cell.(CellNumeric)
 	testing.expect(t, ok, "Cell should be CellInt")
-	testing.expect_value(t, cell_int.value, 200)
+	testing.expect_value(t, cell_f64.value, 200)
 }
 
 @(test)
@@ -277,8 +277,8 @@ test_formula_evaluation_after_input :: proc(t: ^testing.T) {
 
 	// Check A1
 	cell_a1 := get_cell(state.grid, 0, 0)
-	cell_a1_int := cell_a1.(CellInt)
-	testing.expect_value(t, cell_a1_int.value, 10)
+	cell_a1_f64 := cell_a1.(CellNumeric)
+	testing.expect_value(t, cell_a1_f64.value, 10)
 
 	// Check B1 formula result
 	cell_b1 := get_cell(state.grid, 0, 1)
@@ -386,8 +386,8 @@ test_dependent_formulas_chain :: proc(t: ^testing.T) {
 
 	// Verify A1 = 10
 	cell_a1 := get_cell(state.grid, 0, 0)
-	cell_a1_int := cell_a1.(CellInt)
-	testing.expect_value(t, cell_a1_int.value, 10)
+	cell_a1_f64 := cell_a1.(CellNumeric)
+	testing.expect_value(t, cell_a1_f64.value, 10)
 
 	// Verify A2 = 15
 	cell_a2 := get_cell(state.grid, 1, 0)
@@ -561,4 +561,136 @@ test_visual_mode_yank_exits :: proc(t: ^testing.T) {
 	// Should have exited visual mode
 	testing.expect_value(t, state.mode, Mode.normal)
 	testing.expect_value(t, state.selecting, false)
+}
+
+@(test)
+test_cell_picking_initialization :: proc(t: ^testing.T) {
+	state := make_test_state()
+	defer cleanup_test_state(&state)
+
+	// Navigate to cell 2,2
+	set_cur_cell(&state, 2, 2)
+	testing.expect_value(t, state.cur_row, 2)
+	testing.expect_value(t, state.cur_col, 2)
+
+	// Enter insert mode
+	handle_keypress(&state, 10) // Enter
+	testing.expect_value(t, state.mode, Mode.insert)
+	testing.expect_value(t, state.edit_row, 2)
+	testing.expect_value(t, state.edit_col, 2)
+
+	// Current cursor should still be at 2,2
+	testing.expect_value(t, state.cur_row, 2)
+	testing.expect_value(t, state.cur_col, 2)
+
+	// Press Control+Space to enter cell picking mode
+	handle_keypress(&state, 0)
+	testing.expect_value(t, state.selecting, true)
+	testing.expect_value(t, state.selected_first, false)
+
+	// Selection start should be initialized to current position (2,2)
+	testing.expect_value(t, state.select_row_start, 2)
+	testing.expect_value(t, state.select_col_start, 2)
+}
+
+@(test)
+test_cell_picking_full_workflow :: proc(t: ^testing.T) {
+	state := make_test_state()
+	defer cleanup_test_state(&state)
+
+	// Navigate to cell 2,2
+	set_cur_cell(&state, 2, 2)
+
+	// Enter insert mode
+	handle_keypress(&state, 10) // Enter
+	testing.expect_value(t, state.mode, Mode.insert)
+
+	// Type "=" to start a formula
+	handle_keypress(&state, '=')
+	field := strings.to_string(state.formula_field)
+	testing.expect_value(t, field, "=")
+
+	// Press Control+Space to enter cell picking mode
+	handle_keypress(&state, 0)
+	testing.expect_value(t, state.selecting, true)
+
+	// Selection start should be at current position (2,2)
+	testing.expect_value(t, state.select_row_start, 2)
+	testing.expect_value(t, state.select_col_start, 2)
+
+	// Move up once (should be at 1,2)
+	handle_keypress(&state, 'k')
+	testing.expect_value(t, state.cur_row, 1)
+	testing.expect_value(t, state.cur_col, 2)
+
+	// Move left once (should be at 1,1)
+	handle_keypress(&state, 'h')
+	testing.expect_value(t, state.cur_row, 1)
+	testing.expect_value(t, state.cur_col, 1)
+
+	// Press Enter to mark the start of selection
+	handle_keypress(&state, 10)
+	testing.expect_value(t, state.selected_first, true)
+	testing.expect_value(t, state.select_row_start, 1)
+	testing.expect_value(t, state.select_col_start, 1)
+
+	// Move right twice (should be at 1,3)
+	handle_keypress(&state, 'l')
+	handle_keypress(&state, 'l')
+	testing.expect_value(t, state.cur_row, 1)
+	testing.expect_value(t, state.cur_col, 3)
+
+	// Move down once (should be at 2,3)
+	handle_keypress(&state, 'j')
+	testing.expect_value(t, state.cur_row, 2)
+	testing.expect_value(t, state.cur_col, 3)
+
+	// Press Enter to mark the end and insert the range
+	handle_keypress(&state, 10)
+	testing.expect_value(t, state.selecting, false)
+	testing.expect_value(t, state.selected_first, false)
+
+	// Should have returned to edit cell (2,2)
+	testing.expect_value(t, state.cur_row, 2)
+	testing.expect_value(t, state.cur_col, 2)
+
+	// Formula field should now contain "=B2:D3"
+	field = strings.to_string(state.formula_field)
+	testing.expect_value(t, field, "=B2:D3")
+}
+
+@(test)
+test_cell_picking_arrow_keys :: proc(t: ^testing.T) {
+	state := make_test_state()
+	defer cleanup_test_state(&state)
+
+	set_cur_cell(&state, 5, 5)
+
+	// Enter insert mode
+	handle_keypress(&state, 10)
+	testing.expect_value(t, state.mode, Mode.insert)
+
+	// Press Control+Space to enter cell picking mode
+	handle_keypress(&state, 0)
+	testing.expect_value(t, state.selecting, true)
+
+	// Simulate up arrow: ESC [ A
+	handle_keypress(&state, 27) // ESC
+	handle_keypress(&state, 91) // [
+	handle_keypress(&state, 65) // A (up)
+
+	// Should still be in cell picking mode and moved up
+	testing.expect_value(t, state.selecting, true)
+	testing.expect_value(t, state.cur_row, 4)
+	testing.expect_value(t, state.cur_col, 5)
+
+	// Simulate left arrow: ESC [ D
+	handle_keypress(&state, 27) // ESC
+	handle_keypress(&state, 91) // [
+	handle_keypress(&state, 68) // D (left)
+
+	// Should still be in cell picking mode and moved left
+	testing.expect_value(t, state.selecting, true)
+	testing.expect_value(t, state.cur_row, 4)
+	testing.expect_value(t, state.cur_col, 4)
 }

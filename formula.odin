@@ -92,7 +92,7 @@ parse_formula :: proc(formula: string) -> ^ast.Expr {
 	return parser.parse_expr(&p, false)
 }
 
-evaluate_cell :: proc(grid: ^Grid, cell: CellFunc) -> (result: int, err: string) {
+evaluate_cell :: proc(grid: ^Grid, cell: CellFunc) -> (result: f64, err: string) {
 	assert(cell.formula[0] == '=', "Formula needs to start with a =")
 	formula := cell.formula[1:]
 
@@ -110,7 +110,7 @@ evaluate_cell :: proc(grid: ^Grid, cell: CellFunc) -> (result: int, err: string)
 	return evaluate_ast_expr(expr, grid)
 }
 
-evaluate_ast_expr :: proc(expr: ^ast.Expr, grid: ^Grid) -> (result: int, err: string) {
+evaluate_ast_expr :: proc(expr: ^ast.Expr, grid: ^Grid) -> (result: f64, err: string) {
 	if expr == nil do return 0, ""
 
 	#partial switch node in expr.derived {
@@ -127,7 +127,7 @@ evaluate_ast_expr :: proc(expr: ^ast.Expr, grid: ^Grid) -> (result: int, err: st
 
 			cell := get_cell(grid, row, col)
 			switch cell in cell {
-			case CellInt:
+			case CellNumeric:
 				return cell.value, ""
 			case CellFunc:
 				// Recursive evaluation
@@ -147,7 +147,7 @@ evaluate_ast_expr :: proc(expr: ^ast.Expr, grid: ^Grid) -> (result: int, err: st
 		#partial switch node.tok.kind {
 		case .Integer:
 			value, ok := strconv.parse_int(node.tok.text)
-			if ok do return value, ""
+			if ok do return f64(value), ""
 		}
 		return 0, "Unknown token kind"
 
@@ -167,7 +167,7 @@ evaluate_ast_expr :: proc(expr: ^ast.Expr, grid: ^Grid) -> (result: int, err: st
 			if right != 0 do return left / right, ""
 			return 0, "Cannot divide by 0"
 		case .Eq:
-			return int(left == right), ""
+			return f64(int(left == right)), ""
 		case:
 			log.error("Unsupported binary operation:", node.op.kind)
 			return 0, "Unsupported binary operation"
@@ -215,7 +215,7 @@ find_deps :: proc(grid: ^Grid) -> map[string][dynamic]string {
 		case ^ast.Paren_Expr:
 			rec_find(node.expr, collect_deps)
 		case ^ast.Basic_Lit:
-			// Literals (numbers, strings) have no dependencies
+		// Literals (numbers, strings) have no dependencies
 		case ^ast.Call_Expr:
 			// Function calls like SUM(A1:A5)
 			panic("Function calls not implemented yet")
@@ -371,7 +371,7 @@ evaluate_grid :: proc(grid: ^Grid) {
 test_one_cell :: proc(t: ^testing.T) {
 	grid := new_grid()
 	defer delete_grid(grid)
-	set_cell(grid, 0, 0, CellInt{value = 1})
+	set_cell(grid, 0, 0, CellNumeric{value = 1})
 	set_cell(grid, 0, 1, CellFunc{value = 0, formula = "=A1+1"})
 	result, error := evaluate_cell(grid, get_cell(grid, 0, 1).(CellFunc))
 
@@ -383,8 +383,8 @@ test_one_cell :: proc(t: ^testing.T) {
 test_binary_ops :: proc(t: ^testing.T) {
 	grid := new_grid()
 	defer delete_grid(grid)
-	set_cell(grid, 0, 0, CellInt{value = 6})
-	set_cell(grid, 0, 1, CellInt{value = 3})
+	set_cell(grid, 0, 0, CellNumeric{value = 6})
+	set_cell(grid, 0, 1, CellNumeric{value = 3})
 
 	// Addition
 	set_cell(grid, 1, 0, CellFunc{formula = "=A1+B1"})
@@ -415,8 +415,8 @@ test_binary_ops :: proc(t: ^testing.T) {
 test_division_by_zero :: proc(t: ^testing.T) {
 	grid := new_grid()
 	defer delete_grid(grid)
-	set_cell(grid, 0, 0, CellInt{value = 10})
-	set_cell(grid, 0, 1, CellInt{value = 0})
+	set_cell(grid, 0, 0, CellNumeric{value = 10})
+	set_cell(grid, 0, 1, CellNumeric{value = 0})
 	set_cell(grid, 0, 2, CellFunc{formula = "=A1/B1"})
 
 	val, err := evaluate_cell(grid, get_cell(grid, 0, 2).(CellFunc))
@@ -428,7 +428,7 @@ test_division_by_zero :: proc(t: ^testing.T) {
 test_unary_ops :: proc(t: ^testing.T) {
 	grid := new_grid()
 	defer delete_grid(grid)
-	set_cell(grid, 0, 0, CellInt{value = 5})
+	set_cell(grid, 0, 0, CellNumeric{value = 5})
 
 	// Negation
 	set_cell(grid, 0, 1, CellFunc{formula = "=-A1"})
@@ -459,9 +459,9 @@ test_unknown_cell :: proc(t: ^testing.T) {
 test_parentheses :: proc(t: ^testing.T) {
 	grid := new_grid()
 	defer delete_grid(grid)
-	set_cell(grid, 0, 0, CellInt{value = 2})
-	set_cell(grid, 0, 1, CellInt{value = 3})
-	set_cell(grid, 0, 2, CellInt{value = 4})
+	set_cell(grid, 0, 0, CellNumeric{value = 2})
+	set_cell(grid, 0, 1, CellNumeric{value = 3})
+	set_cell(grid, 0, 2, CellNumeric{value = 4})
 
 	set_cell(grid, 1, 0, CellFunc{formula = "=(A1+B1)*C1"})
 	val, err := evaluate_cell(grid, get_cell(grid, 1, 0).(CellFunc))
@@ -474,8 +474,8 @@ test_parentheses :: proc(t: ^testing.T) {
 test_grid :: proc(t: ^testing.T) {
 	grid := new_grid()
 	defer delete_grid(grid)
-	set_cell(grid, 0, 0, CellInt{value = 1})
-	set_cell(grid, 0, 1, CellInt{value = 2})
+	set_cell(grid, 0, 0, CellNumeric{value = 1})
+	set_cell(grid, 0, 1, CellNumeric{value = 2})
 	set_cell(grid, 0, 2, CellFunc{value = 0, formula = "=A1+B1"})
 	evaluate_grid(grid)
 	cell := get_cell(grid, 0, 2)
@@ -509,10 +509,10 @@ test_cyclic_dependency :: proc(t: ^testing.T) {
 test_nested_parentheses :: proc(t: ^testing.T) {
 	grid := new_grid()
 	defer delete_grid(grid)
-	set_cell(grid, 0, 0, CellInt{value = 2})
-	set_cell(grid, 0, 1, CellInt{value = 3})
-	set_cell(grid, 0, 2, CellInt{value = 4})
-	set_cell(grid, 0, 3, CellInt{value = 5})
+	set_cell(grid, 0, 0, CellNumeric{value = 2})
+	set_cell(grid, 0, 1, CellNumeric{value = 3})
+	set_cell(grid, 0, 2, CellNumeric{value = 4})
+	set_cell(grid, 0, 3, CellNumeric{value = 5})
 
 	set_cell(grid, 1, 0, CellFunc{formula = "=((A1+B1)*C1)/D1"})
 	val, err := evaluate_cell(grid, get_cell(grid, 1, 0).(CellFunc))
@@ -531,14 +531,14 @@ test_nested_parentheses :: proc(t: ^testing.T) {
 test_complex_expressions :: proc(t: ^testing.T) {
 	grid := new_grid()
 	defer delete_grid(grid)
-	set_cell(grid, 0, 0, CellInt{value = 10})
-	set_cell(grid, 0, 1, CellInt{value = 5})
-	set_cell(grid, 0, 2, CellInt{value = 2})
+	set_cell(grid, 0, 0, CellNumeric{value = 10})
+	set_cell(grid, 0, 1, CellNumeric{value = 5})
+	set_cell(grid, 0, 2, CellNumeric{value = 2})
 
 	set_cell(grid, 1, 0, CellFunc{formula = "=A1-B1+C1*2"})
 	val, err := evaluate_cell(grid, get_cell(grid, 1, 0).(CellFunc))
 
-	expected := 10 - 5 + 2 * 2 // Should follow operator precedence
+	expected := f64(10 - 5 + 2 * 2) // Should follow operator precedence
 	testing.expect(t, val == expected)
 	testing.expect(t, err == "")
 
@@ -554,10 +554,10 @@ test_complex_expressions :: proc(t: ^testing.T) {
 test_operator_precedence :: proc(t: ^testing.T) {
 	grid := new_grid()
 	defer delete_grid(grid)
-	set_cell(grid, 0, 0, CellInt{value = 10})
-	set_cell(grid, 0, 1, CellInt{value = 2})
-	set_cell(grid, 0, 2, CellInt{value = 3})
-	set_cell(grid, 0, 3, CellInt{value = 4})
+	set_cell(grid, 0, 0, CellNumeric{value = 10})
+	set_cell(grid, 0, 1, CellNumeric{value = 2})
+	set_cell(grid, 0, 2, CellNumeric{value = 3})
+	set_cell(grid, 0, 3, CellNumeric{value = 4})
 
 	set_cell(grid, 1, 0, CellFunc{formula = "=A1+B1*C1"})
 	val, err := evaluate_cell(grid, get_cell(grid, 1, 0).(CellFunc))
@@ -576,7 +576,8 @@ test_operator_precedence :: proc(t: ^testing.T) {
 
 	set_cell(grid, 1, 3, CellFunc{formula = "=A1-B1*C1/D1"})
 	val, err = evaluate_cell(grid, get_cell(grid, 1, 3).(CellFunc))
-	testing.expect(t, val == 10 - (2 * 3) / 4)
+	testing.expect(t, val == 10.0 - (2.0 * 3.0) / 4.0)
+	testing.expect_value(t, val, 10.0 - (2.0 * 3.0) / 4.0)
 	testing.expect(t, err == "")
 }
 
@@ -585,7 +586,7 @@ test_recursive_formula_evaluation :: proc(t: ^testing.T) {
 	grid := new_grid()
 	defer delete_grid(grid)
 
-	set_cell(grid, 0, 0, CellInt{value = 5})
+	set_cell(grid, 0, 0, CellNumeric{value = 5})
 	set_cell(grid, 0, 1, CellFunc{formula = "=A1*2"})
 	set_cell(grid, 0, 2, CellFunc{formula = "=B1+A1"})
 	set_cell(grid, 0, 3, CellFunc{formula = "=C1-B1"})
@@ -604,7 +605,7 @@ test_recursive_formula_evaluation :: proc(t: ^testing.T) {
 
 	set_cell(grid, 1, 0, CellFunc{formula = "=D1*C1"})
 	val, err = evaluate_cell(grid, get_cell(grid, 1, 0).(CellFunc))
-	expected := (((5 * 2) + 5) - (5 * 2)) * ((5 * 2) + 5)
+	expected := f64((((5 * 2) + 5) - (5 * 2)) * ((5 * 2) + 5))
 	testing.expect(t, val == expected)
 	testing.expect(t, err == "")
 }
@@ -705,8 +706,8 @@ test_invalid_formulas :: proc(t: ^testing.T) {
 	grid := new_grid()
 	defer delete_grid(grid)
 
-	set_cell(grid, 0, 0, CellInt{value = 10})
-	set_cell(grid, 0, 1, CellInt{value = 0})
+	set_cell(grid, 0, 0, CellNumeric{value = 10})
+	set_cell(grid, 0, 1, CellNumeric{value = 0})
 
 	set_cell(grid, 1, 0, CellFunc{formula = "=A1/B1"})
 	val, err := evaluate_cell(grid, get_cell(grid, 1, 0).(CellFunc))
@@ -724,7 +725,7 @@ test_mixed_cell_types :: proc(t: ^testing.T) {
 	grid := new_grid()
 	defer delete_grid(grid)
 
-	set_cell(grid, 0, 0, CellInt{value = 10})
+	set_cell(grid, 0, 0, CellNumeric{value = 10})
 	set_cell(grid, 0, 1, CellFunc{formula = "=A1*2"})
 	set_cell(grid, 0, 2, CellEmpty{})
 

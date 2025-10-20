@@ -34,9 +34,9 @@ load_data :: proc(file_path: string) -> ^Grid {
 			else if len(value) > 0 && value[0] == '=' {
 				append(&values[row_idx], CellFunc{formula = strings.clone(value)})
 			} else {
-				parsed_value, ok := strconv.parse_int(value)
+				parsed_value, ok := strconv.parse_f64(value)
 				if ok {
-					append(&values[row_idx], CellInt{value = parsed_value})
+					append(&values[row_idx], CellNumeric{value = parsed_value})
 				} else {
 					append(&values[row_idx], CellText{value = strings.clone(value)})
 				}
@@ -79,16 +79,8 @@ save_data :: proc(grid: ^Grid, file_path: string) {
 
 		for column in 0 ..< grid.cols {
 			cell := get_cell(grid, row, column)
-			switch cell in cell {
-			case CellFunc:
-				record[column] = cell.formula
-			case CellInt:
-				record[column] = fmt.tprintf("%d", cell.value)
-			case CellText:
-				record[column] = cell.value
-			case CellEmpty:
-				record[column] = ""
-			}
+			as_string := cell_to_string(cell)
+			record[column] = as_string
 		}
 		csv.write(&w, record)
 	}

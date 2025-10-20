@@ -101,13 +101,10 @@ handle_cell_picking :: proc(state: ^State, c: u8) -> bool {
 		case 68, 'h':
 			set_cur_cell(state, cur_row, cur_col - 1)
 		}
-	} else if c == 27 {
-		// ESC - exit cell picking mode
-		state.selecting = false
-		state.selected_first = false
-		set_cur_cell(state, state.edit_row, state.edit_col)
-	} else if c == 91 {
-		// '[' character from escape sequences - ignore
+	} else if c == 27 || c == 91 {
+		// ESC and '[' character from escape sequences - ignore
+		// (these are part of arrow key sequences, not standalone commands)
+		// To exit cell picking mode, press Control+Space again or complete with Enter
 	}
 
 	return false
@@ -125,6 +122,11 @@ handle_insert_mode :: proc(state: ^State, c: u8) -> bool {
 		// Control+Space toggles cell picking mode
 		state.selecting = !state.selecting
 		state.selected_first = false
+		if state.selecting {
+			// Initialize selection to current position when entering picking mode
+			state.select_row_start = state.cur_row
+			state.select_col_start = state.cur_col
+		}
 		return false
 	}
 
@@ -146,7 +148,7 @@ handle_insert_mode :: proc(state: ^State, c: u8) -> bool {
 		// Don't delete c.error - it's always a string literal
 		case CellText:
 			delete(c.value) // value is heap-allocated via strings.clone()
-		case CellInt, CellEmpty:
+		case CellNumeric, CellEmpty:
 		// No cleanup needed
 		}
 
@@ -158,9 +160,14 @@ handle_insert_mode :: proc(state: ^State, c: u8) -> bool {
 				CellFunc{formula = strings.clone(value)},
 			)
 		} else {
-			parsed_value, ok := strconv.parse_int(value)
+			parsed_value, ok := strconv.parse_f64(value)
 			if ok {
-				set_cell(state.grid, state.edit_row, state.edit_col, CellInt{value = parsed_value})
+				set_cell(
+					state.grid,
+					state.edit_row,
+					state.edit_col,
+					CellNumeric{value = parsed_value},
+				)
 			} else {
 				set_cell(
 					state.grid,
@@ -215,8 +222,10 @@ handle_normal_mode :: proc(state: ^State, c: u8) -> bool {
 		switch c in cell {
 		case CellFunc:
 			strings.write_string(&state.formula_field, c.formula)
-		case CellInt:
-			fmt.sbprintf(&state.formula_field, "%d", c.value)
+		case CellNumeric:
+			as_str := cell_to_string(c)
+			defer delete(as_str)
+			strings.write_string(&state.formula_field, as_str)
 		case CellText:
 			strings.write_string(&state.formula_field, c.value)
 		case CellEmpty:
@@ -328,11 +337,16 @@ paste_from_clipboard :: proc(state: ^State) {
 			// Parse and insert cell value
 			if len(col_data) > 0 {
 				// Try to parse as integer
-				if parsed_int, ok := strconv.parse_int(col_data); ok {
-					set_cell(state.grid, target_row, target_col, CellInt{value = parsed_int})
+				if parsed_int, ok := strconv.parse_f64(col_data); ok {
+					set_cell(state.grid, target_row, target_col, CellNumeric{value = parsed_int})
 				} else {
 					// Store as text
-					set_cell(state.grid, target_row, target_col, CellText{value = strings.clone(col_data)})
+					set_cell(
+						state.grid,
+						target_row,
+						target_col,
+						CellText{value = strings.clone(col_data)},
+					)
 				}
 			}
 		}
@@ -358,15 +372,15 @@ yank_selection :: proc(state: ^State) {
 
 			// Convert cell to string value
 			switch c in cell {
-			case CellInt:
-				fmt.sbprintf(&builder, "%d", c.value)
+			case CellNumeric:
+				fmt.sbprintf(&builder, "%f", c.value)
 			case CellFunc:
 				// For formulas, copy the evaluated value
 				fmt.sbprintf(&builder, "%d", c.value)
 			case CellText:
 				strings.write_string(&builder, c.value)
 			case CellEmpty:
-				// Empty cell
+			// Empty cell
 			}
 
 			// Add tab separator between columns (except last column)
@@ -434,8 +448,8 @@ handle_visual_mode :: proc(state: ^State, c: u8) -> bool {
 		state.select_row_end = state.cur_row
 		state.select_col_end = state.cur_col
 	case 27, 91:
-		// ESC and '[' character from escape sequences - ignore
-		// (these are part of arrow key sequences, not standalone commands)
+	// ESC and '[' character from escape sequences - ignore
+	// (these are part of arrow key sequences, not standalone commands)
 	}
 
 	return false
