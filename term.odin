@@ -3,8 +3,8 @@ import "core:fmt"
 import "core:os"
 import "core:sys/posix"
 
-oldt, newt: posix.termios;
-enter_raw_mode :: proc(){
+oldt, newt: posix.termios
+enter_raw_mode :: proc() {
 
 	// Get current terminal attributes
 	if posix.tcgetattr(posix.FD(os.stdin), &oldt) != .OK {
@@ -21,7 +21,7 @@ enter_raw_mode :: proc(){
 		fmt.println("Error setting terminal attributes")
 		return
 	}
-	
+
 	// Hide cursor
 	fmt.print("\033[?25l")
 }
@@ -33,11 +33,11 @@ exit_raw_mode :: proc() {
 	posix.tcsetattr(posix.FD(os.stdin), .TCSANOW, &oldt)
 }
 
-get_press :: proc() -> u8{
+get_press :: proc() -> u8 {
 	buf: [1]u8
 	n, err := os.read(os.stdin, buf[:])
 	if err != 0 || n == 0 {
-		
+
 		fmt.eprintfln("Error reading input or EOF")
 		os.exit(1)
 	}
