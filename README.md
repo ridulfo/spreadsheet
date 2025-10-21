@@ -50,15 +50,37 @@ First B1 is evaluated, then C1.
 
 A hand-rolled topological sort has been implemented for educational purposes, despite Odin having an [implementation in the standard library](https://pkg.odin-lang.org/core/container/topological_sort/).
 
-## TODO
-- [ ] modal editing
-- [ ] add support for ranges
-- [ ] add function calling
-- [ ] add support for excel files (.xls & .xlsx)
-- [ ] add more cell types (strings, dates)
+## Features for MVP
+- modal editing
+    - [x] normal
+    - [x] insert
+    - [x] cell label picking
+    - [x] visual + copy & paste
+- [x] open csv files
+- cell types
+    - [x] integers
+    - [x] formulas
     - [x] strings
-    - [ ] float
-    - [ ] dates
+    - [x] floats
+- calculations
+    - [x] evaluate formulas
+    - [x] add support for ranges
+    - [x] function calling
+
+### Future features (?)
+- [ ] undo/redo
+- [ ] auto-fill (drag bottom right corner)
+- [ ] relative (A1), absolute ($A$1), mixed ($A1, A$1) (needed by auto-fill)
 - [ ] only reevaluate dependent cells
 - [ ] multi-thread independent evaluation
+- [ ] multiple sheets
+- [ ] row filtering
+- [ ] freeze rows/columns
+- [ ] cell formatting (colors, font)
+- [ ] cell manual width and height
+- [ ] datetime cells
+- open excel files
+    - [ ] xls
+    - [ ] xlsx
+
 
