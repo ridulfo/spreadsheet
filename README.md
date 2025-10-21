@@ -2,7 +2,9 @@
 
 A terminal based spreadsheet editor and calculator.
 
-It allows you to quickly perform calculations on a spreadsheet - right in your terminal!
+It allows you to quickly perform spreadsheet calculations - right in your terminal!
+
+[![asciicast](https://asciinema.org/a/eV1KPFbl5wAjTZV3GXzNxOdn1.svg)](https://asciinema.org/a/eV1KPFbl5wAjTZV3GXzNxOdn1)
 
 ## How-to
 
