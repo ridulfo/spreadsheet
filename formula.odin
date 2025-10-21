@@ -472,6 +472,13 @@ find_deps :: proc(grid: ^Grid) -> map[string][dynamic]string {
 								start_row, start_col, ok1 := identifier_to_coordinates(start)
 								end_row, end_col, ok2 := identifier_to_coordinates(end)
 								if ok1 && ok2 {
+									// Normalize range so start <= end
+									if start_row > end_row {
+										start_row, end_row = end_row, start_row
+									}
+									if start_col > end_col {
+										start_col, end_col = end_col, start_col
+									}
 									// Add all cells in range as dependencies
 									for row in start_row ..= end_row {
 										for col in start_col ..= end_col {

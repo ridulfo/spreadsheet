@@ -17,6 +17,14 @@ func_sum :: proc(grid: ^Grid, range_str: string) -> (result: f64, err: string) {
 		return 0, "Invalid range coordinates"
 	}
 
+	// Normalize range so start <= end
+	if start_row > end_row {
+		start_row, end_row = end_row, start_row
+	}
+	if start_col > end_col {
+		start_col, end_col = end_col, start_col
+	}
+
 	// Sum all values in the range
 	sum := f64(0)
 	for row in start_row ..= end_row {
@@ -56,6 +64,14 @@ func_product :: proc(grid: ^Grid, range_str: string) -> (result: f64, err: strin
 		return 0, "Invalid range coordinates"
 	}
 
+	// Normalize range so start <= end
+	if start_row > end_row {
+		start_row, end_row = end_row, start_row
+	}
+	if start_col > end_col {
+		start_col, end_col = end_col, start_col
+	}
+
 	// Multiply all values in the range
 	product := f64(1)
 	for row in start_row ..= end_row {
@@ -93,6 +109,14 @@ func_countif :: proc(grid: ^Grid, range_str: string, criteria: string) -> (resul
 
 	if !ok1 || !ok2 {
 		return 0, "Invalid range coordinates"
+	}
+
+	// Normalize range so start <= end
+	if start_row > end_row {
+		start_row, end_row = end_row, start_row
+	}
+	if start_col > end_col {
+		start_col, end_col = end_col, start_col
 	}
 
 	// Count cells matching the criteria
@@ -138,6 +162,14 @@ func_sumif :: proc(grid: ^Grid, range_str: string, criteria: string) -> (result:
 
 	if !ok1 || !ok2 {
 		return 0, "Invalid range coordinates"
+	}
+
+	// Normalize range so start <= end
+	if start_row > end_row {
+		start_row, end_row = end_row, start_row
+	}
+	if start_col > end_col {
+		start_col, end_col = end_col, start_col
 	}
 
 	// Sum cells matching the criteria
