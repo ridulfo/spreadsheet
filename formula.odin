@@ -151,6 +151,104 @@ parse_range :: proc(identifier: string, allocator := context.allocator) -> (star
 	return
 }
 
+// Evaluate a criteria expression against a cell value
+// criteria examples: ">10", "<=5", "=3", "<>7"
+// Returns true if the cell value matches the criteria
+evaluate_criteria :: proc(cell_value: f64, criteria: string) -> (result: bool, err: string) {
+	// Transform criteria to a parseable expression with a placeholder
+	// e.g., ">10" becomes "__cell__ > 10"
+	formula_str := fmt.tprintf("__cell__ %s", criteria)
+
+	// Parse the criteria as an expression
+	expr: ^ast.Expr
+	{
+		prev_allocator := context.allocator
+		context.allocator = context.temp_allocator
+		defer context.allocator = prev_allocator
+
+		expr = parse_formula(formula_str)
+	}
+
+	// Evaluate with a special case for __cell__ identifier
+	eval_result, eval_err := evaluate_criteria_expr(expr, cell_value)
+	if eval_err != "" {
+		return false, eval_err
+	}
+
+	// Non-zero means true (matches criteria)
+	return eval_result != 0, ""
+}
+
+// Helper to evaluate criteria expression with __cell__ substitution
+evaluate_criteria_expr :: proc(expr: ^ast.Expr, cell_value: f64) -> (result: f64, err: string) {
+	if expr == nil do return 0, ""
+
+	#partial switch node in expr.derived {
+	case ^ast.Ident:
+		// Special handling for __cell__ placeholder
+		if node.name == "__cell__" {
+			return cell_value, ""
+		}
+		return 0, "Unknown identifier in criteria"
+
+	case ^ast.Basic_Lit:
+		// Numeric literals
+		#partial switch node.tok.kind {
+		case .Integer:
+			value, ok := strconv.parse_int(node.tok.text)
+			if ok do return f64(value), ""
+		case .Float:
+			value, ok := strconv.parse_f64(node.tok.text)
+			if ok do return value, ""
+		}
+		return 0, "Unknown token kind"
+
+	case ^ast.Binary_Expr:
+		// Operations like >, <, >=, <=, ==, !=
+		left, error_left := evaluate_criteria_expr(node.left, cell_value)
+		right, error_right := evaluate_criteria_expr(node.right, cell_value)
+
+		if error_left != "" do return 0, error_left
+		if error_right != "" do return 0, error_right
+
+		#partial switch node.op.kind {
+		case .Gt:
+			return f64(int(left > right)), ""
+		case .Lt:
+			return f64(int(left < right)), ""
+		case .Gt_Eq:
+			return f64(int(left >= right)), ""
+		case .Lt_Eq:
+			return f64(int(left <= right)), ""
+		case .Cmp_Eq:
+			return f64(int(left == right)), ""
+		case .Not_Eq:
+			return f64(int(left != right)), ""
+		case:
+			return 0, "Unsupported comparison operator in criteria"
+		}
+
+	case ^ast.Unary_Expr:
+		operand, error := evaluate_criteria_expr(node.expr, cell_value)
+		if error != "" do return 0, error
+
+		#partial switch node.op.kind {
+		case .Sub:
+			return -operand, ""
+		case .Add:
+			return operand, ""
+		case:
+			return 0, "Unsupported unary operation in criteria"
+		}
+
+	case ^ast.Paren_Expr:
+		return evaluate_criteria_expr(node.expr, cell_value)
+
+	case:
+		return 0, "Unsupported expression in criteria"
+	}
+}
+
 // Transform any function call with ranges: FUNC(A1:B5) -> FUNC(A1B5)
 // Simply removes the colon to create a range identifier
 transform_ranges_to_calls :: proc(formula: string) -> string {
@@ -293,9 +391,9 @@ evaluate_ast_expr :: proc(expr: ^ast.Expr, grid: ^Grid) -> (result: f64, err: st
 		return evaluate_ast_expr(node.expr, grid)
 
 	case ^ast.Call_Expr:
-		// Function calls like SUM(A1B5)
+		// Function calls like SUM(A1B5) or COUNTIF(A1B5, ">10")
 		if ident, is_ident := node.expr.derived.(^ast.Ident); is_ident {
-			// Check if we have a single identifier argument
+			// Handle 1-argument functions (SUM, PRODUCT)
 			if len(node.args) == 1 {
 				if arg_ident, is_arg_ident := node.args[0].derived.(^ast.Ident); is_arg_ident {
 					// Dispatch to the appropriate function - let the function validate
@@ -307,6 +405,27 @@ evaluate_ast_expr :: proc(expr: ^ast.Expr, grid: ^Grid) -> (result: f64, err: st
 					}
 				}
 			}
+
+			// Handle 2-argument functions (COUNTIF, SUMIF)
+			if len(node.args) == 2 {
+				// First arg: identifier (range)
+				// Second arg: string literal (criteria)
+				if arg_ident, is_arg_ident := node.args[0].derived.(^ast.Ident); is_arg_ident {
+					if criteria_lit, is_lit := node.args[1].derived.(^ast.Basic_Lit);
+					   is_lit && criteria_lit.tok.kind == .String {
+						// Remove quotes from string literal
+						criteria_str := criteria_lit.tok.text[1:len(criteria_lit.tok.text) - 1]
+
+						switch ident.name {
+						case "COUNTIF":
+							return func_countif(grid, arg_ident.name, criteria_str)
+						case "SUMIF":
+							return func_sumif(grid, arg_ident.name, criteria_str)
+						}
+					}
+				}
+			}
+
 			return 0, fmt.tprintf("%s: unsupported argument type", ident.name)
 		}
 		return 0, "Unsupported function call"
@@ -334,13 +453,13 @@ find_deps :: proc(grid: ^Grid) -> map[string][dynamic]string {
 		case ^ast.Basic_Lit:
 		// Literals (numbers, strings) have no dependencies
 		case ^ast.Call_Expr:
-			// Function calls like SUM(A1B5)
-			// Extract dependencies from the range identifier
+			// Function calls like SUM(A1B5) or COUNTIF(A1B5, ">10")
+			// Extract dependencies from the range identifier (first argument)
 			call_node := cast(^ast.Call_Expr)node
 			if ident, is_ident := call_node.expr.derived.(^ast.Ident); is_ident {
-				// Check for any function with range argument
-				if len(call_node.args) == 1 {
-					// Check if argument is an identifier
+				// Check for functions with 1 or 2 arguments where first arg is a range
+				if len(call_node.args) >= 1 {
+					// Check if first argument is an identifier
 					if arg_ident, is_arg_ident := call_node.args[0].derived.(^ast.Ident);
 					   is_arg_ident {
 						if is_range(arg_ident.name) {
