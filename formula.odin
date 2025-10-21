@@ -10,6 +10,7 @@ import "core:os"
 import "core:strconv"
 import "core:strings"
 import "core:testing"
+import "core:text/match"
 
 
 /* TODO: use Lua for formulas too */
@@ -67,6 +68,101 @@ coordinates_to_identifier :: proc(row: int, col: int, allocator := context.alloc
 	return strings.clone(strings.to_string(builder), allocator)
 }
 
+// Check if an identifier is a range (e.g., "A1B5" instead of just "A1")
+// A range has the pattern: [A-Z]+[0-9]+[A-Z]+[0-9]+
+is_range :: proc(identifier: string) -> bool {
+	if len(identifier) < 4 do return false // Minimum: "A1B1"
+
+	// Find transitions in the identifier
+	// Should be: letters -> digits -> letters -> digits
+	state := 0 // 0=initial, 1=first_letters, 2=first_digits, 3=second_letters, 4=second_digits
+
+	for char in identifier {
+		switch state {
+		case 0:
+			if char >= 'A' && char <= 'Z' {
+				state = 1
+			} else {
+				return false
+			}
+		case 1: // Reading first column letters
+			if char >= 'A' && char <= 'Z' {
+				// Continue
+			} else if char >= '0' && char <= '9' {
+				state = 2
+			} else {
+				return false
+			}
+		case 2: // Reading first row digits
+			if char >= '0' && char <= '9' {
+				// Continue
+			} else if char >= 'A' && char <= 'Z' {
+				state = 3
+			} else {
+				return false
+			}
+		case 3: // Reading second column letters
+			if char >= 'A' && char <= 'Z' {
+				// Continue
+			} else if char >= '0' && char <= '9' {
+				state = 4
+			} else {
+				return false
+			}
+		case 4: // Reading second row digits
+			if char >= '0' && char <= '9' {
+				// Continue
+			} else {
+				return false
+			}
+		}
+	}
+
+	// Valid range must end in state 4 (finished reading second row digits)
+	return state == 4
+}
+
+// Parse a range identifier like "A1B5" into start="A1" and end="B5"
+parse_range :: proc(identifier: string, allocator := context.allocator) -> (start: string, end: string, ok: bool) {
+	if !is_range(identifier) do return "", "", false
+
+	// Find the transition from first digits to second letters
+	state := 0 // 0=letters, 1=digits, 2=done
+	split_index := -1
+
+	for char, i in identifier {
+		if state == 0 && char >= 'A' && char <= 'Z' {
+			// Still in first letters
+		} else if state == 0 && char >= '0' && char <= '9' {
+			state = 1
+		} else if state == 1 && char >= '0' && char <= '9' {
+			// Still in first digits
+		} else if state == 1 && char >= 'A' && char <= 'Z' {
+			split_index = i
+			break
+		}
+	}
+
+	if split_index == -1 do return "", "", false
+
+	start = strings.clone(identifier[:split_index], allocator)
+	end = strings.clone(identifier[split_index:], allocator)
+	ok = true
+	return
+}
+
+// Transform any function call with ranges: FUNC(A1:B5) -> FUNC(A1B5)
+// Simply removes the colon to create a range identifier
+transform_ranges_to_calls :: proc(formula: string) -> string {
+	if !strings.contains(formula, ":") {
+		return formula
+	}
+
+	// Simply remove colons from the formula
+	result, _ := strings.replace_all(formula, ":", "", context.temp_allocator)
+	return result
+}
+
 parse_formula :: proc(formula: string) -> ^ast.Expr {
 	t := tokenizer.Tokenizer{}
 	p := parser.Parser{}
@@ -96,6 +192,10 @@ evaluate_cell :: proc(grid: ^Grid, cell: CellFunc) -> (result: f64, err: string)
 	assert(cell.formula[0] == '=', "Formula needs to start with a =")
 	formula := cell.formula[1:]
 
+	// Transform Excel-style ranges to function call: FUNC(A1:B5) -> FUNC(range("A1:B5"))
+	// This allows the Odin parser to accept the formula
+	parsed_formula := transform_ranges_to_calls(formula)
+
 	// Use temp allocator only for AST parsing to avoid leaks
 	expr: ^ast.Expr
 	{
@@ -103,7 +203,7 @@ evaluate_cell :: proc(grid: ^Grid, cell: CellFunc) -> (result: f64, err: string)
 		context.allocator = context.temp_allocator
 		defer context.allocator = prev_allocator
 
-		expr = parse_formula(formula)
+		expr = parse_formula(parsed_formula)
 	}
 
 	// Traverse and evaluate the AST
@@ -114,6 +214,8 @@ evaluate_ast_expr :: proc(expr: ^ast.Expr, grid: ^Grid) -> (result: f64, err: st
 	if expr == nil do return 0, ""
 
 	#partial switch node in expr.derived {
+	// case ^ast.Call_Expr:
+	// 	node.args
 	case ^ast.Ident:
 		// Cell reference like "A2"
 		if validate_identifier(node.name) {
@@ -191,8 +293,23 @@ evaluate_ast_expr :: proc(expr: ^ast.Expr, grid: ^Grid) -> (result: f64, err: st
 		return evaluate_ast_expr(node.expr, grid)
 
 	case ^ast.Call_Expr:
-		// Function calls like SUM(A1:A5)
-		panic("Function calls not implemented yet")
+		// Function calls like SUM(A1B5)
+		if ident, is_ident := node.expr.derived.(^ast.Ident); is_ident {
+			// Check if we have a single identifier argument
+			if len(node.args) == 1 {
+				if arg_ident, is_arg_ident := node.args[0].derived.(^ast.Ident); is_arg_ident {
+					// Dispatch to the appropriate function - let the function validate
+					switch ident.name {
+					case "SUM":
+						return func_sum(grid, arg_ident.name)
+					case "PRODUCT":
+						return func_product(grid, arg_ident.name)
+					}
+				}
+			}
+			return 0, fmt.tprintf("%s: unsupported argument type", ident.name)
+		}
+		return 0, "Unsupported function call"
 
 	case:
 		log.error("Unsupported AST node type:", expr.derived)
@@ -217,8 +334,42 @@ find_deps :: proc(grid: ^Grid) -> map[string][dynamic]string {
 		case ^ast.Basic_Lit:
 		// Literals (numbers, strings) have no dependencies
 		case ^ast.Call_Expr:
-			// Function calls like SUM(A1:A5)
-			panic("Function calls not implemented yet")
+			// Function calls like SUM(A1B5)
+			// Extract dependencies from the range identifier
+			call_node := cast(^ast.Call_Expr)node
+			if ident, is_ident := call_node.expr.derived.(^ast.Ident); is_ident {
+				// Check for any function with range argument
+				if len(call_node.args) == 1 {
+					// Check if argument is an identifier
+					if arg_ident, is_arg_ident := call_node.args[0].derived.(^ast.Ident);
+					   is_arg_ident {
+						if is_range(arg_ident.name) {
+							// Parse range like "A1B5" into start and end
+							start, end, ok := parse_range(
+								arg_ident.name,
+								context.temp_allocator,
+							)
+							if ok {
+								start_row, start_col, ok1 := identifier_to_coordinates(start)
+								end_row, end_col, ok2 := identifier_to_coordinates(end)
+								if ok1 && ok2 {
+									// Add all cells in range as dependencies
+									for row in start_row ..= end_row {
+										for col in start_col ..= end_col {
+											cell_id := coordinates_to_identifier(
+												row,
+												col,
+												context.temp_allocator,
+											)
+											append(collect_deps, strings.clone(cell_id))
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
 		case:
 			log.error("Unsupported AST node type:", node)
 			panic("Unsupported AST node")
@@ -233,13 +384,17 @@ find_deps :: proc(grid: ^Grid) -> map[string][dynamic]string {
 			all_deps := make([dynamic]string)
 			formula := func_cell.formula[1:] // Strip the leading '='
 
+			// Apply same transformation as evaluate_cell
+			// Transform Excel-style ranges to function call: FUNC(A1:B5) -> FUNC(range("A1:B5"))
+			parsed_formula := transform_ranges_to_calls(formula)
+
 			// Use temp allocator for AST parsing to avoid leaks
 			{
 				prev_allocator := context.allocator
 				context.allocator = context.temp_allocator
 				defer context.allocator = prev_allocator
 
-				expr: ^ast.Node = parse_formula(formula)
+				expr: ^ast.Node = parse_formula(parsed_formula)
 				rec_find(expr, &all_deps)
 			}
 
